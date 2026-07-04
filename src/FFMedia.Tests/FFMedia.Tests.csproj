@@ -25,4 +25,13 @@
     <ProjectReference Include="..\FFMedia.Tools.YouTubeDownloader\FFMedia.Tools.YouTubeDownloader.csproj" />
   </ItemGroup>
 
+  <!-- Bundled yt-dlp/ffmpeg binaries (fetched via build/fetch-binaries.ps1, git-ignored) for the
+       trait-gated Integration tests. Copies nothing (no build error) when the folder is absent. -->
+  <ItemGroup>
+    <None Include="..\..\assets\binaries\**" Condition="Exists('..\..\assets\binaries')">
+      <Link>assets\binaries\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

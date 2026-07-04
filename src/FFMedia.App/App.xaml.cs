@@ -2,9 +2,12 @@ using System.IO;
 using System.Windows;
 using FFMedia.App.ViewModels;
 using FFMedia.Core;
+using FFMedia.Tools.YouTubeDownloader;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Serilog;
+using Wpf.Ui;
+using Wpf.Ui.DependencyInjection;
 
 namespace FFMedia.App;
 
@@ -29,6 +32,9 @@ public partial class App : Application
             .ConfigureServices(services =>
             {
                 services.AddFFMediaCore(binariesDir);
+                services.AddNavigationViewPageProvider();
+                services.AddSingleton<INavigationService, NavigationService>();
+                services.AddYouTubeDownloader();
                 services.AddSingleton<MainWindowViewModel>();
                 services.AddSingleton<MainWindow>();
             })
