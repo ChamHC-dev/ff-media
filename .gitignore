@@ -1,0 +1,49 @@
+## .NET / Visual Studio / Rider build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Rider / JetBrains
+.idea/
+*.DotSettings.user
+
+## Visual Studio
+.vs/
+
+## Test / coverage
+[Tt]est[Rr]esult*/
+*.coverage
+*.coveragexml
+coverage*.json
+coverage*.xml
+coverage*.info
+
+## NuGet
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+!**/packages/build/
+
+## Publish / packaging output
+publish/
+Releases/
+*.msix
+*.appx
+
+## Bundled external binaries (fetched by build/fetch-binaries script)
+assets/binaries/
+
+## OS / misc
+Thumbs.db
+Desktop.ini
+*.log
