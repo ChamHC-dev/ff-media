@@ -1,23 +1,19 @@
-﻿using System.Text;
-using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
-using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
+using FFMedia.App.ViewModels;
+using FFMedia.App.Views;
+using Wpf.Ui.Controls;
 
 namespace FFMedia.App;
 
-/// <summary>
-/// Interaction logic for MainWindow.xaml
-/// </summary>
-public partial class MainWindow : Window
+public partial class MainWindow : FluentWindow
 {
-    public MainWindow()
+    public MainWindow(MainWindowViewModel viewModel)
     {
+        DataContext = viewModel;
         InitializeComponent();
+
+        // Navigate once the NavigationView's control template (and its internal
+        // content presenter) has been applied. WPF-UI 4.3.0's NavigationView has no
+        // externally settable Content/Frame, so navigation happens via Navigate().
+        Loaded += (_, _) => RootNavigation.Navigate(typeof(WelcomePage));
     }
 }
