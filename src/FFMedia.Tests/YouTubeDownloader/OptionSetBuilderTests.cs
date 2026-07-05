@@ -32,6 +32,18 @@ public class OptionSetBuilderTests
         Assert.DoesNotContain("height<=", o.Format);
     }
 
+    [Theory]
+    [InlineData(VideoResolution.P2160, "[height<=2160]")]
+    [InlineData(VideoResolution.P1440, "[height<=1440]")]
+    [InlineData(VideoResolution.P1080, "[height<=1080]")]
+    [InlineData(VideoResolution.P720, "[height<=720]")]
+    [InlineData(VideoResolution.P480, "[height<=480]")]
+    public void Video_HeightCap_MatchesResolution(VideoResolution resolution, string expectedCap)
+    {
+        var o = OptionSetBuilder.Build(Video(VideoContainer.Mp4, resolution), @"C:\out");
+        Assert.Contains(expectedCap, o.Format);
+    }
+
     [Fact]
     public void Video_Mkv_SetsMergeMkv_AndGenericSelector()
     {
@@ -65,13 +77,27 @@ public class OptionSetBuilderTests
         Assert.True(o.NoPlaylist);
     }
 
-    [Fact]
-    public void Audio_Mp3_192k_EmitsAudioQualityCustomOption()
+    [Theory]
+    [InlineData(AudioBitrate.K320, "320K")]
+    [InlineData(AudioBitrate.K256, "256K")]
+    [InlineData(AudioBitrate.K192, "192K")]
+    [InlineData(AudioBitrate.K128, "128K")]
+    public void Audio_Mp3_EmitsExpectedAudioQualityValue(AudioBitrate bitrate, string expected)
     {
-        var o = OptionSetBuilder.Build(Audio(AudioFormat.Mp3, AudioBitrate.K192), @"C:\out");
+        var o = OptionSetBuilder.Build(Audio(AudioFormat.Mp3, bitrate), @"C:\out");
         var rendered = o.ToString();
         Assert.Contains("--audio-quality", rendered);
-        Assert.Contains("192K", rendered);
+        Assert.Contains(expected, rendered);
+    }
+
+    [Theory]
+    [InlineData(AudioFormat.Mp3)]
+    [InlineData(AudioFormat.M4a)]
+    [InlineData(AudioFormat.Opus)]
+    public void Audio_LossyFormats_NonBestBitrate_EmitAudioQuality(AudioFormat format)
+    {
+        var o = OptionSetBuilder.Build(Audio(format, AudioBitrate.K192), @"C:\out");
+        Assert.Contains("--audio-quality", o.ToString());
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using FFMedia.Tools.YouTubeDownloader.Models;
 using YoutubeDLSharp.Options;
@@ -32,7 +33,8 @@ public static class OptionSetBuilder
             {
                 VideoContainer.Mp4  => DownloadMergeFormat.Mp4,
                 VideoContainer.Webm => DownloadMergeFormat.Webm,
-                _                   => DownloadMergeFormat.Mkv,
+                VideoContainer.Mkv  => DownloadMergeFormat.Mkv,
+                _ => throw new ArgumentOutOfRangeException(nameof(config.Container), config.Container, "Unhandled VideoContainer."),
             },
             NoPlaylist = true,
             Output = output,
@@ -50,7 +52,8 @@ public static class OptionSetBuilder
                 ModelAudioFormat.Wav  => AudioConversionFormat.Wav,
                 ModelAudioFormat.M4a  => AudioConversionFormat.M4a,
                 ModelAudioFormat.Opus => AudioConversionFormat.Opus,
-                _                     => AudioConversionFormat.Flac,
+                ModelAudioFormat.Flac => AudioConversionFormat.Flac,
+                _ => throw new ArgumentOutOfRangeException(nameof(config.AudioFormat), config.AudioFormat, "Unhandled AudioFormat."),
             },
             Format = "ba/b",
             NoPlaylist = true,
@@ -71,7 +74,8 @@ public static class OptionSetBuilder
         VideoResolution.P1080 => "[height<=1080]",
         VideoResolution.P720  => "[height<=720]",
         VideoResolution.P480  => "[height<=480]",
-        _                     => "", // Best: no cap
+        VideoResolution.Best  => "", // Best: no cap
+        _ => throw new ArgumentOutOfRangeException(nameof(r), r, "Unhandled VideoResolution."),
     };
 
     private static bool IsLossy(ModelAudioFormat f) =>
@@ -82,6 +86,7 @@ public static class OptionSetBuilder
         AudioBitrate.K320 => "320K",
         AudioBitrate.K256 => "256K",
         AudioBitrate.K192 => "192K",
-        _                 => "128K",
+        AudioBitrate.K128 => "128K",
+        _ => throw new ArgumentOutOfRangeException(nameof(b), b, "Unhandled AudioBitrate."),
     };
 }
