@@ -35,6 +35,7 @@ public partial class App : Application
                 services.AddNavigationViewPageProvider();
                 services.AddSingleton<INavigationService, NavigationService>();
                 services.AddYouTubeDownloader();
+                services.AddSingleton<FFMedia.App.Services.ThemeService>();
                 services.AddSingleton<MainWindowViewModel>();
                 services.AddSingleton<MainWindow>();
             })
@@ -60,6 +61,10 @@ public partial class App : Application
         };
 
         await _host.StartAsync();
+
+        var settings = _host.Services.GetRequiredService<FFMedia.Core.Settings.ISettingsService>();
+        _host.Services.GetRequiredService<FFMedia.App.Services.ThemeService>().Apply(settings.Current.Theme);
+
         _host.Services.GetRequiredService<MainWindow>().Show();
     }
 
