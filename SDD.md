@@ -221,8 +221,10 @@ All defined in `FFMedia.Core`, injected via DI, and fakeable in tests.
 5. **Run** — a worker builds a yt-dlp `OptionSet` from the config, executes via
    `YoutubeDLSharp`, forwards `Progress<DownloadProgress>` to the ViewModel, and
    passes the job's `CancellationToken`.
-6. **Post-process** — yt-dlp performs recode / audio-extract / embed. Standalone
-   trim (if the user asked for a clip without re-encode) uses `FFMedia.Media`.
+6. **Post-process** — yt-dlp performs recode / audio-extract / trim / subtitle &
+   metadata/thumbnail embed. Trim is realized via yt-dlp `--download-sections`
+   (`--force-keyframes-at-cuts` for precise cuts); the `FFMedia.Media` FFMpegCore trim
+   wrapper is reserved for future tools (see §8).
 7. **Complete** — notify, write to history, expose "Open folder" / "Open file".
 
 ### 7.2 Job state machine
@@ -256,7 +258,7 @@ Queued ─▶ Downloading ─▶ Processing ─▶ Completed
 The `OptionSet` builder is a **pure function** `DownloadConfig → yt-dlp args`
 (heavily unit-tested). Representative mappings:
 
-| User choice | yt-dlp options produced (M2, via `OptionSetBuilder`) |
+| User choice | yt-dlp options produced (M2/M4, via `OptionSetBuilder`) |
 |---|---|
 | MP4, cap ≤N | `-f "bv*[height<=N][ext=mp4]+ba[ext=m4a]/b[height<=N][ext=mp4]/bv*[height<=N]+ba/b[height<=N]" --merge-output-format mp4` |
 | MP4, Best | as above without any `[height<=N]` filter |
