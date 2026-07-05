@@ -24,7 +24,8 @@ public static class OptionSetBuilder
         {
             VideoContainer.Mp4  => $"bv*{h}[ext=mp4]+ba[ext=m4a]/b{h}[ext=mp4]/bv*{h}+ba/b{h}",
             VideoContainer.Webm => $"bv*{h}[ext=webm]+ba[ext=webm]/b{h}[ext=webm]/bv*{h}+ba/b{h}",
-            _                   => $"bv*{h}+ba/b{h}", // Mkv holds any codec — no ext preference
+            VideoContainer.Mkv  => $"bv*{h}+ba/b{h}", // Mkv holds any codec — no ext preference
+            _ => throw new ArgumentOutOfRangeException(nameof(config.Container), config.Container, "Unhandled VideoContainer."),
         };
         return new OptionSet
         {
