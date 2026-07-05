@@ -33,6 +33,32 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-05 — M3 Queue
+
+- **Done:** Download queue engine in `FFMedia.Tools.YouTubeDownloader`: `DownloadJob`
+  (observable `Status`/`Progress`/`ProgressText`/`ErrorMessage`/`OutputPath` + per-job
+  `CancellationTokenSource`), `JobStatus { Queued, Downloading, Processing, Completed,
+  Canceled, Failed }`, `RetryPolicy` (transient-error classification + exponential
+  backoff, default 3 attempts/1s), and `IDownloadManager`/`DownloadManager` (bounded
+  concurrency via `SemaphoreSlim`, default cap 3; auto-start on enqueue; per-job cancel
+  + cancel-all; clear-completed; failure isolation; `IdleAsync()` for deterministic
+  tests). Added playlist/channel expansion (`IPlaylistProbe`/`YtDlpPlaylistProbe` +
+  pure `PlaylistMapping`/`MediaEntry`) so a playlist URL becomes one job per entry at
+  add-time. `DownloaderViewModel` restructured from single probe/download to
+  "add to queue" with a bound `Jobs` list; the page shows the queue with per-job
+  progress/cancel plus cancel-all/clear-completed. Trait-gated queue integration test
+  added. SDD synced to v0.5 (§6 queue placement, §7.2 realized state machine, §12
+  concurrency model, §17 M3 row, §19 resolutions).
+- **Decisions:** auto-start on add (no separate "start" step); transient-only
+  auto-retry with exponential backoff, permanent errors fail fast; probing/playlist
+  expansion happens at add-time so `DownloadManager` stays a pure download engine (no
+  `Fetching` state inside it); cancel-only for M3 (no pause/resume — stays a stretch
+  goal per §19); concurrency cap = 3 is a constant this milestone (user-configurable
+  deferred to M5); queue lives in the YouTube Downloader module, not `FFMedia.Core`
+  (it orchestrates the module's own `IMediaProbe`/`IDownloadService`) — the generic
+  bounded-concurrency shape can move to Core if a second tool needs it.
+- **Next:** M4 — trim/clip, subtitles, and metadata + thumbnail embedding.
+
 ### 2026-07-05 — M2 Formats
 
 - **Done:** Full format matrix — a pure, exhaustively-tested `OptionSetBuilder` maps a
