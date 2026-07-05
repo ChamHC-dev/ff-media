@@ -42,7 +42,7 @@ public class DownloaderViewModelTests
         public FFMedia.Core.Settings.AppSettings Current { get; private set; } =
             FFMedia.Core.Settings.AppSettings.Default with { DefaultOutputFolder = @"C:\seeded" };
         public void Save(FFMedia.Core.Settings.AppSettings settings) => Current = settings;
-        public event EventHandler<FFMedia.Core.Settings.AppSettings>? Changed;
+        public event EventHandler<FFMedia.Core.Settings.AppSettings>? Changed { add { } remove { } }
     }
 
     private static DownloaderViewModel Vm(FakePlaylistProbe probe, FakeManager mgr) =>
