@@ -24,9 +24,19 @@ public class TrimParsingTests
     [InlineData("abc")]
     [InlineData("1:70")]      // minutes/seconds field out of range
     [InlineData("-5")]
+    [InlineData("70:00")]     // minutes field out of range (clock format)
+    [InlineData("-1:30")]     // negative clock
+    [InlineData("1000000000000000000000")]  // seconds magnitude overflows TimeSpan
+    [InlineData("999999999:00:00")]          // hours magnitude overflows TimeSpan
     public void TryParse_BlankOrInvalid_ReturnsNull(string? text)
     {
         Assert.Null(TrimParsing.TryParse(text));
+    }
+
+    [Fact]
+    public void TryParse_FractionalSeconds_ParsesWithInvariantCulture()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(1.5), TrimParsing.TryParse("1.5"));
     }
 
     [Fact]

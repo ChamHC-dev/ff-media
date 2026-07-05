@@ -14,7 +14,20 @@ public static class TrimParsing
         text = text.Trim();
 
         if (double.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var seconds) && seconds >= 0)
-            return TimeSpan.FromSeconds(seconds);
+        {
+            try
+            {
+                return TimeSpan.FromSeconds(seconds);
+            }
+            catch (OverflowException)
+            {
+                return null;
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return null;
+            }
+        }
 
         var parts = text.Split(':');
         if (parts.Length is 2 or 3 &&
@@ -23,7 +36,20 @@ public static class TrimParsing
             var n = parts.Select(part => int.Parse(part, CultureInfo.InvariantCulture)).ToArray();
             var (h, m, s) = parts.Length == 3 ? (n[0], n[1], n[2]) : (0, n[0], n[1]);
             if (h >= 0 && m is >= 0 and < 60 && s is >= 0 and < 60)
-                return new TimeSpan(h, m, s);
+            {
+                try
+                {
+                    return new TimeSpan(h, m, s);
+                }
+                catch (OverflowException)
+                {
+                    return null;
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    return null;
+                }
+            }
         }
 
         return null;
