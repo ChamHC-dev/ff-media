@@ -8,10 +8,10 @@ namespace FFMedia.Tests.YouTubeDownloader;
 public class OptionSetBuilderTests
 {
     private static DownloadConfig Video(VideoContainer c, VideoResolution r) =>
-        new(OutputKind.Video, c, r, AudioFormat.Mp3, AudioBitrate.Best);
+        new(OutputKind.Video, c, r, AudioFormat.Mp3, AudioBitrate.Best, ProcessingOptions.Default);
 
     private static DownloadConfig Audio(AudioFormat f, AudioBitrate b) =>
-        new(OutputKind.Audio, VideoContainer.Mp4, VideoResolution.Best, f, b);
+        new(OutputKind.Audio, VideoContainer.Mp4, VideoResolution.Best, f, b, ProcessingOptions.Default);
 
     [Fact]
     public void Video_Mp4_1080p_SetsMergeMp4_HeightCap_Mp4ExtPreference_AndOutputTemplate()

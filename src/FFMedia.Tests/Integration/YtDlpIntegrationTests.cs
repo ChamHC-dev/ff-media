@@ -69,7 +69,8 @@ public class YtDlpIntegrationTests
         {
             var svc = new YtDlpDownloadService(new YoutubeDlFactory(binaries));
             var config = new DownloadConfig(
-                OutputKind.Audio, VideoContainer.Mp4, VideoResolution.Best, AudioFormat.Mp3, AudioBitrate.K192);
+                OutputKind.Audio, VideoContainer.Mp4, VideoResolution.Best, AudioFormat.Mp3, AudioBitrate.K192,
+                ProcessingOptions.Default);
             var progress = new Progress<DownloadUpdate>(_ => { });
 
             var result = await svc.DownloadAsync(new DownloadRequest(TestUrl, outDir, config), progress, CancellationToken.None);

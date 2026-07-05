@@ -60,7 +60,8 @@ public partial class DownloaderViewModel : ObservableObject
         try
         {
             var config = new DownloadConfig(
-                SelectedKind, SelectedContainer, SelectedResolution, SelectedAudioFormat, SelectedBitrate);
+                SelectedKind, SelectedContainer, SelectedResolution, SelectedAudioFormat, SelectedBitrate,
+                ProcessingOptions.Default);
 
             var result = await _playlistProbe.ExpandAsync(Url, CancellationToken.None);
             if (!result.IsSuccess)
