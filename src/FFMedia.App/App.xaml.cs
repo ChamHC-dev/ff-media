@@ -31,7 +31,7 @@ public partial class App : Application
             .UseSerilog()
             .ConfigureServices(services =>
             {
-                services.AddFFMediaCore(binariesDir);
+                services.AddFFMediaCore(binariesDir, appData);
                 services.AddNavigationViewPageProvider();
                 services.AddSingleton<INavigationService, NavigationService>();
                 services.AddYouTubeDownloader();
