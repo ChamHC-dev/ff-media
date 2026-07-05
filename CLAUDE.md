@@ -33,6 +33,23 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-05 — M1 fix: crash on Probe (missing binaries + no error isolation)
+
+- **Bug:** Clicking **Probe** closed the app with no dialog/log. Root cause (found via
+  systematic debugging + a reproduction test): (A) nothing copied `assets/binaries/*`
+  into `FFMedia.App`'s output, so the resolved `yt-dlp.exe` path didn't exist, and
+  (B) the resulting `Win32Exception` from `Process.Start` was unhandled — services
+  didn't catch it, and no global exception handler existed (SDD §11 unimplemented).
+- **Fix:** (A) App/Tests csproj now copy `assets/binaries/*.exe` to output; (B)
+  `YtDlpMediaProbe`/`YtDlpDownloadService` catch exceptions → `Result.Failure`
+  (friendly "run fetch-binaries" message for missing binaries; cancellation still
+  propagates), and `App` wires `DispatcherUnhandledException` +
+  `AppDomain.UnhandledException` + `TaskScheduler.UnobservedTaskException` → Serilog
+  `Fatal` + dialog. Added `YtDlpServiceErrorTests`. Verified: build clean, 20 unit
+  tests pass, **both integration tests (real probe + real MP4 download) pass**, app
+  boots with no Fatal.
+- **Next:** M2 — full format matrix (unchanged).
+
 ### 2026-07-05 — M1 Vertical Slice
 
 - **Done:** YouTube Downloader tool end-to-end — paste URL → probe (`IMediaProbe`) →

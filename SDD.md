@@ -275,7 +275,10 @@ directly (as opposed to delegating to yt-dlp):
   `assets/binaries/`. They are **git-ignored**; a `build/fetch-binaries` script
   downloads pinned versions for local dev and CI.
 - **Resolution:** `IBinaryProvider` resolves the app-relative binary path at
-  runtime; never relies on the system PATH.
+  runtime (`AppContext.BaseDirectory/assets/binaries`); never relies on the system
+  PATH. The **`FFMedia.App` and `FFMedia.Tests` builds copy `assets/binaries/*.exe`
+  into their output** so `dotnet run` and the integration tests find the binaries
+  (no-op when the folder is empty — run `build/fetch-binaries.ps1` first).
 - **Updating:**
   - **App + ffmpeg** update via **Velopack** releases.
   - **yt-dlp** additionally supports in-app self-update (`yt-dlp -U`) because it

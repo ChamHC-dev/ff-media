@@ -44,8 +44,33 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // SDD §11 — no silent crashes: log every unhandled exception and show a friendly dialog.
+        DispatcherUnhandledException += (_, args) =>
+        {
+            ReportFatal(args.Exception);
+            args.Handled = true; // keep the app alive after a UI-thread exception
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+            ReportFatal(args.ExceptionObject as Exception);
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            ReportFatal(args.Exception);
+            args.SetObserved();
+        };
+
         await _host.StartAsync();
         _host.Services.GetRequiredService<MainWindow>().Show();
+    }
+
+    private static void ReportFatal(Exception? ex)
+    {
+        Log.Fatal(ex, "Unhandled exception");
+        MessageBox.Show(
+            ex?.Message ?? "An unexpected error occurred.",
+            "FFMedia — unexpected error",
+            MessageBoxButton.OK,
+            MessageBoxImage.Error);
     }
 
     protected override async void OnExit(ExitEventArgs e)
