@@ -32,7 +32,7 @@ public sealed class YtDlpPlaylistProbe : IPlaylistProbe
         }
         catch (Exception ex)
         {
-            return Result<IReadOnlyList<MediaEntry>>.Failure(ex.Message);
+            return Result<IReadOnlyList<MediaEntry>>.Failure(YtDlpErrors.Describe(ex));
         }
     }
 }
