@@ -1,6 +1,6 @@
 # FFMedia — Software Design Document (SDD)
 
-> **Status:** Living document · **Version:** 0.3 · **Last updated:** 2026-07-05
+> **Status:** Living document · **Version:** 0.4 · **Last updated:** 2026-07-05
 >
 > **This document is the single source of truth for the FFMedia project.** Any
 > architectural decision, scope change, or convention lives here first. Code and
@@ -238,21 +238,20 @@ Queued ─▶ Fetching ─▶ Downloading ─▶ Processing ─▶ Completed
 The `OptionSet` builder is a **pure function** `DownloadConfig → yt-dlp args`
 (heavily unit-tested). Representative mappings:
 
-| User choice | yt-dlp behavior (conceptual) |
+| User choice | yt-dlp options produced (M2, via `OptionSetBuilder`) |
 |---|---|
-| MP4 (best ≤1080p) | `-f "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[ext=mp4]" --merge-output-format mp4` |
-| MKV (best) | `-f "bv*+ba/b" --merge-output-format mkv` |
-| Audio → MP3 | `-x --audio-format mp3 --audio-quality 0` |
-| Audio → WAV | `-x --audio-format wav` |
-| Audio → FLAC/M4A/Opus | `-x --audio-format <fmt>` |
-| Embed thumbnail | `--embed-thumbnail` |
-| Embed metadata | `--embed-metadata` |
-| Subtitles | `--write-subs --embed-subs --sub-langs <langs>` |
-| Trim/clip | `--download-sections "*START-END"` (or ffmpeg re-encode via FFMedia.Media) |
-| Output template | `-o "<folder>/%(title)s.%(ext)s"` |
+| MP4, cap ≤N | `-f "bv*[height<=N][ext=mp4]+ba[ext=m4a]/b[height<=N][ext=mp4]/bv*[height<=N]+ba/b[height<=N]" --merge-output-format mp4` |
+| MP4, Best | as above without any `[height<=N]` filter |
+| MKV, cap ≤N | `-f "bv*[height<=N]+ba/b[height<=N]" --merge-output-format mkv` |
+| WebM, cap ≤N | `-f "bv*[height<=N][ext=webm]+ba[ext=webm]/b[height<=N][ext=webm]/bv*[height<=N]+ba/b[height<=N]" --merge-output-format webm` |
+| Audio MP3/M4A/Opus | `-x --audio-format <fmt> -f "ba/b"` (+ `--audio-quality <n>K` when a specific bitrate is chosen) |
+| Audio WAV/FLAC | `-x --audio-format <fmt> -f "ba/b"` (lossless — bitrate ignored) |
+| All | `--no-playlist -o "<folder>/%(title)s.%(ext)s"` |
 
-> Exact flags are finalized against the bundled yt-dlp version during M2 and
-> recorded here.
+> **M2 decisions:** downloads **mux** into the container via `--merge-output-format` (no
+> re-encode; M1's `--recode-video` was dropped). Resolution is a **cap** (`[height<=N]`), not a
+> per-video format-list selection. Audio bitrate is emitted via `OptionSet.AddCustomOption`
+> ("--audio-quality") because the typed `AudioQuality` is the 0–10 VBR scale, not a bitrate.
 
 ---
 
@@ -388,7 +387,7 @@ Each milestone is a **vertical, shippable increment**.
 |---|---|---|
 | **M0** | Foundation | ✅ delivered (branch `feat/m0-foundation`) — Repo + solution scaffold, `.gitignore`, CI build, `IBinaryProvider` + binary-fetch script, WPF-UI shell with empty `NavigationView`, DI/host wiring, Serilog. |
 | **M1** | Vertical slice | ✅ delivered (branch `feat/m1-vertical-slice`) — Paste URL → probe → download single **MP4** with **live progress + cancel**. End-to-end through all layers. |
-| **M2** | Formats | Full format matrix: video containers + audio-only (**wav/mp3**/m4a/opus/flac) + quality/resolution. `OptionSet` builder fully tested. |
+| **M2** | Formats | ✅ delivered (branch `feat/m2-formats`) — Full format matrix: video containers + audio-only (**wav/mp3**/m4a/opus/flac) + quality/resolution. `OptionSet` builder fully tested. |
 | **M3** | Queue | Download **queue**, bounded **concurrency**, **playlist/channel** support. |
 | **M4** | Processing | **Trim/clip**, **subtitles**, **metadata + thumbnail** embedding. |
 | **M5** | Experience | **Settings**, **presets**, **history**, **notifications**, dark/light **theming**. |
@@ -431,6 +430,7 @@ Each milestone is a **vertical, shippable increment**.
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-07-05 | 0.4 | M2 formats: full matrix via pure `OptionSetBuilder` — video (MP4/MKV/WebM) at a resolution cap + audio-only (MP3/WAV/M4A/Opus/FLAC) with bitrate; `DownloadConfig` model; ViewModel selections + page dropdowns; §7.3 flags finalized (mux over recode, `--audio-quality` via custom option). |
 | 2026-07-05 | 0.3 | M1 vertical slice delivered: YouTube Downloader tool (probe + single-MP4 download w/ live progress + cancel) via YoutubeDLSharp; module + tests retargeted to `net9.0-windows` (UseWPF); `IMediaProbe`/`IDownloadService` seam with a unit-tested `DownloaderViewModel` (fakes) + trait-gated yt-dlp integration test; shell nav wiring joins `ITool` + `IToolPage` (WPF-UI navigation); added `Result<T>` and `IToolPage` to Core. |
 | 2026-07-04 | 0.2 | M0 foundation delivered: solution skeleton, Core (`ITool`/`IToolRegistry`, `IBinaryProvider`, `AddFFMediaCore`), WPF-UI shell w/ Host+Serilog, fetch-binaries script, CI. `ITool.Icon` is now a string glyph (Core stays UI-agnostic); assertion library deferred (FluentAssertions v8 is paid); M0 uses plain xUnit `Assert`. WPF-UI resolved to 4.3.0. |
 | 2026-07-04 | 0.1 | Initial SDD from brainstorming: stack (WPF+WPF-UI/.NET 9), modular shell architecture, downloader design, milestones M0–M7. |

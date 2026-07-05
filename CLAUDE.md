@@ -33,6 +33,17 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-05 — M2 Formats
+
+- **Done:** Full format matrix — a pure, exhaustively-tested `OptionSetBuilder` maps a
+  `DownloadConfig` to yt-dlp options: video MP4/MKV/WebM at a resolution cap, or audio-only
+  MP3/WAV/M4A/Opus/FLAC with a bitrate (lossless ignores it). ViewModel exposes the
+  selections; the page gained Video/Audio + format/quality dropdowns. SDD §7.3 finalized.
+- **Changed:** dropped M1's `RecodeVideo` (re-encode) for `MergeOutputFormat` (mux); removed
+  `DownloadOptions.Mp4`; `DownloadRequest` now carries a `DownloadConfig`. Audio bitrate uses
+  `OptionSet.AddCustomOption("--audio-quality", …)` (typed `AudioQuality` is 0–10 VBR only).
+- **Next:** M3 — download queue, bounded concurrency, playlist/channel support.
+
 ### 2026-07-05 — M1 fix: crash on Probe (missing binaries + no error isolation)
 
 - **Bug:** Clicking **Probe** closed the app with no dialog/log. Root cause (found via
