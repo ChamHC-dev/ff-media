@@ -2,9 +2,12 @@
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+    <Page.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    </Page.Resources>
     <StackPanel Margin="24" MaxWidth="720">
         <TextBlock Text="YouTube Downloader" FontSize="24" FontWeight="SemiBold" />
-        <TextBlock Text="Paste a URL, probe it, then download as MP4." Opacity="0.8" Margin="0,4,0,16" />
+        <TextBlock Text="Paste a URL, probe it, choose a format, then download." Opacity="0.8" Margin="0,4,0,16" />
 
         <ui:TextBox PlaceholderText="https://www.youtube.com/watch?v=…"
                     Text="{Binding Url, UpdateSourceTrigger=PropertyChanged}" />
@@ -13,6 +16,29 @@
             <ui:Button Content="Probe" Command="{Binding ProbeCommand}" />
             <ui:Button Content="Download" Command="{Binding DownloadCommand}" Margin="8,0,0,0" />
             <ui:Button Content="Cancel" Command="{Binding CancelCommand}" Margin="8,0,0,0" />
+        </StackPanel>
+
+        <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+            <TextBlock Text="Output:" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <ComboBox ItemsSource="{Binding Kinds}" SelectedItem="{Binding SelectedKind}" Width="120" />
+        </StackPanel>
+
+        <!-- Video options -->
+        <StackPanel Orientation="Horizontal" Margin="0,8,0,0"
+                    Visibility="{Binding IsVideo, Converter={StaticResource BoolToVisibility}}">
+            <TextBlock Text="Container:" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <ComboBox ItemsSource="{Binding Containers}" SelectedItem="{Binding SelectedContainer}" Width="100" />
+            <TextBlock Text="Resolution:" VerticalAlignment="Center" Margin="16,0,8,0" />
+            <ComboBox ItemsSource="{Binding Resolutions}" SelectedItem="{Binding SelectedResolution}" Width="100" />
+        </StackPanel>
+
+        <!-- Audio options -->
+        <StackPanel Orientation="Horizontal" Margin="0,8,0,0"
+                    Visibility="{Binding IsAudio, Converter={StaticResource BoolToVisibility}}">
+            <TextBlock Text="Format:" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <ComboBox ItemsSource="{Binding AudioFormats}" SelectedItem="{Binding SelectedAudioFormat}" Width="100" />
+            <TextBlock Text="Bitrate:" VerticalAlignment="Center" Margin="16,0,8,0" />
+            <ComboBox ItemsSource="{Binding Bitrates}" SelectedItem="{Binding SelectedBitrate}" Width="100" />
         </StackPanel>
 
         <TextBlock Text="{Binding MediaTitle}" FontWeight="SemiBold" Margin="0,16,0,0" />
