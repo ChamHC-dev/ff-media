@@ -110,9 +110,9 @@ abstractions, and can be developed/tested in isolation.
        ▼
 ┌──────────────────────────────────────────────────────────┐
 │ FFMedia.Core  (UI-agnostic services & abstractions)      │
-│  ITool · IBinaryProvider · IJobQueue/DownloadManager ·   │
-│  ISettingsService · IHistoryService ·                    │
-│  INotificationService · IProcessRunner                   │
+│  ITool · IBinaryProvider · ISettingsService ·            │
+│  IHistoryService · INotificationService ·                │
+│  IProcessRunner                                          │
 ├──────────────────────────────────────────────────────────┤
 │ FFMedia.Media — FFMpegCore wrappers (shared)             │
 ├──────────────────────────────────────────────────────────┤
