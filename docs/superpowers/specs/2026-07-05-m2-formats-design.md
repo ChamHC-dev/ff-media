@@ -42,8 +42,10 @@ The `config → yt-dlp args` builder becomes a pure function and is fully unit-t
 3. **Audio bitrate via a custom option.** YoutubeDLSharp's typed `OptionSet.AudioQuality`
    is `byte?` — the yt-dlp **0–10 VBR scale**, which *cannot* express a specific bitrate
    like `192K`. Specific bitrates are therefore emitted through
-   `OptionSet.SetCustomOption("--audio-quality", "192K")`. **Lossless formats (WAV/FLAC)
-   ignore bitrate** (no `--audio-quality` emitted).
+   `OptionSet.AddCustomOption("--audio-quality", "192K")` (verified: `SetCustomOption`
+   only updates an already-added option and leaves `CustomOptions` empty; `AddCustomOption`
+   adds it and it renders into the command line as `--audio-quality "192K"`). **Lossless
+   formats (WAV/FLAC) ignore bitrate** (no `--audio-quality` emitted).
 4. **Container-native stream preference with fallback.** The `-f` selector prefers streams
    that mux cleanly into the chosen container (mp4/m4a for MP4; webm/opus for WebM; any for
    MKV), then falls back to "best video+audio / best" so a download never fails purely for
