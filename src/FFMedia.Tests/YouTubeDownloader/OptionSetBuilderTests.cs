@@ -1,0 +1,97 @@
+using FFMedia.Tools.YouTubeDownloader.Models;
+using FFMedia.Tools.YouTubeDownloader.Services;
+using YoutubeDLSharp.Options;
+using Xunit;
+
+namespace FFMedia.Tests.YouTubeDownloader;
+
+public class OptionSetBuilderTests
+{
+    private static DownloadConfig Video(VideoContainer c, VideoResolution r) =>
+        new(OutputKind.Video, c, r, AudioFormat.Mp3, AudioBitrate.Best);
+
+    private static DownloadConfig Audio(AudioFormat f, AudioBitrate b) =>
+        new(OutputKind.Audio, VideoContainer.Mp4, VideoResolution.Best, f, b);
+
+    [Fact]
+    public void Video_Mp4_1080p_SetsMergeMp4_HeightCap_Mp4ExtPreference_AndOutputTemplate()
+    {
+        var o = OptionSetBuilder.Build(Video(VideoContainer.Mp4, VideoResolution.P1080), @"C:\out");
+        Assert.Equal(DownloadMergeFormat.Mp4, o.MergeOutputFormat);
+        Assert.Contains("[height<=1080]", o.Format);
+        Assert.Contains("ext=mp4", o.Format);
+        Assert.Contains(@"C:\out", o.Output);
+        Assert.Contains("%(title)s.%(ext)s", o.Output);
+        Assert.True(o.NoPlaylist);
+    }
+
+    [Fact]
+    public void Video_Best_HasNoHeightCap()
+    {
+        var o = OptionSetBuilder.Build(Video(VideoContainer.Mp4, VideoResolution.Best), @"C:\out");
+        Assert.DoesNotContain("height<=", o.Format);
+    }
+
+    [Fact]
+    public void Video_Mkv_SetsMergeMkv_AndGenericSelector()
+    {
+        var o = OptionSetBuilder.Build(Video(VideoContainer.Mkv, VideoResolution.P720), @"C:\out");
+        Assert.Equal(DownloadMergeFormat.Mkv, o.MergeOutputFormat);
+        Assert.Contains("[height<=720]", o.Format);
+        Assert.DoesNotContain("ext=", o.Format); // mkv holds any codec
+    }
+
+    [Fact]
+    public void Video_Webm_SetsMergeWebm_AndWebmExtPreference()
+    {
+        var o = OptionSetBuilder.Build(Video(VideoContainer.Webm, VideoResolution.P480), @"C:\out");
+        Assert.Equal(DownloadMergeFormat.Webm, o.MergeOutputFormat);
+        Assert.Contains("ext=webm", o.Format);
+        Assert.Contains("[height<=480]", o.Format);
+    }
+
+    [Theory]
+    [InlineData(AudioFormat.Mp3, AudioConversionFormat.Mp3)]
+    [InlineData(AudioFormat.Wav, AudioConversionFormat.Wav)]
+    [InlineData(AudioFormat.M4a, AudioConversionFormat.M4a)]
+    [InlineData(AudioFormat.Opus, AudioConversionFormat.Opus)]
+    [InlineData(AudioFormat.Flac, AudioConversionFormat.Flac)]
+    public void Audio_SetsExtractAudio_AndMappedFormat(AudioFormat input, AudioConversionFormat expected)
+    {
+        var o = OptionSetBuilder.Build(Audio(input, AudioBitrate.Best), @"C:\out");
+        Assert.True(o.ExtractAudio);
+        Assert.Equal(expected, o.AudioFormat);
+        Assert.Equal("ba/b", o.Format);
+        Assert.True(o.NoPlaylist);
+    }
+
+    [Fact]
+    public void Audio_Mp3_192k_EmitsAudioQualityCustomOption()
+    {
+        var o = OptionSetBuilder.Build(Audio(AudioFormat.Mp3, AudioBitrate.K192), @"C:\out");
+        var rendered = o.ToString();
+        Assert.Contains("--audio-quality", rendered);
+        Assert.Contains("192K", rendered);
+    }
+
+    [Fact]
+    public void Audio_Mp3_Best_OmitsAudioQuality()
+    {
+        var o = OptionSetBuilder.Build(Audio(AudioFormat.Mp3, AudioBitrate.Best), @"C:\out");
+        Assert.DoesNotContain("--audio-quality", o.ToString());
+    }
+
+    [Fact]
+    public void Audio_Wav_IgnoresBitrate_NoAudioQuality()
+    {
+        var o = OptionSetBuilder.Build(Audio(AudioFormat.Wav, AudioBitrate.K320), @"C:\out");
+        Assert.DoesNotContain("--audio-quality", o.ToString());
+    }
+
+    [Fact]
+    public void Audio_Flac_IgnoresBitrate_NoAudioQuality()
+    {
+        var o = OptionSetBuilder.Build(Audio(AudioFormat.Flac, AudioBitrate.K256), @"C:\out");
+        Assert.DoesNotContain("--audio-quality", o.ToString());
+    }
+}
