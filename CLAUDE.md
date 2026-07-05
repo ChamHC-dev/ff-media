@@ -33,6 +33,20 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-05 — M1 Vertical Slice
+
+- **Done:** YouTube Downloader tool end-to-end — paste URL → probe (`IMediaProbe`) →
+  download single MP4 with live progress + cancel (`IDownloadService`) via
+  YoutubeDLSharp; `DownloaderViewModel` unit-tested with fakes; tool page + nav
+  wiring so it appears in the shell's `NavigationView`; trait-gated yt-dlp
+  integration test (excluded in CI); `Result<T>` + `IToolPage` added to Core.
+  Build green, 18 unit tests pass. SDD synced to v0.3.
+- **Changed:** `FFMedia.Tools.YouTubeDownloader` + `FFMedia.Tests` retargeted to
+  `net9.0-windows` (UseWPF) so ViewModels are unit-testable headlessly; CI test
+  step filters `Category!=Integration`.
+- **Next:** M2 — full format matrix (video containers + audio-only
+  wav/mp3/m4a/opus/flac + quality/resolution); `OptionSet` builder fully tested.
+
 ### 2026-07-04 — M0 Foundation
 
 - **Done:** Solution skeleton (Core/Media/Tools/App/Tests); Core `ITool`/`IToolRegistry`,
