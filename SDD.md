@@ -1,6 +1,6 @@
 # FFMedia — Software Design Document (SDD)
 
-> **Status:** Living document · **Version:** 0.7 · **Last updated:** 2026-07-06
+> **Status:** Living document · **Version:** 0.8 · **Last updated:** 2026-07-06
 >
 > **This document is the single source of truth for the FFMedia project.** Any
 > architectural decision, scope change, or convention lives here first. Code and
@@ -210,6 +210,13 @@ All defined in `FFMedia.Core`, injected via DI, and fakeable in tests.
 > `AppSettings` to `%AppData%\FFMedia\settings.json`. `IPresetService`, `IHistoryService`,
 > and `INotificationService` remain **planned**, targeted for M5 PR 2.
 
+> **M5 PR 2 note:** `IPresetService`, `IHistoryService`, and `INotificationService` are
+> now **realized**. `PresetService` and `HistoryService` are JSON-backed (same
+> `JsonStore<T>` foundation, `presets.json`/`history.json`), each exposing a `Changed`
+> event for UI refresh. `INotificationService` is realized in the App layer as
+> `SnackbarNotificationService`, wrapping WPF-UI's `ISnackbarService` (in-app snackbar
+> only; native Windows toast remains deferred to M6, per §13).
+
 ---
 
 ## 7. YouTube Downloader Module (detailed)
@@ -257,6 +264,21 @@ Queued ─▶ Downloading ─▶ Processing ─▶ Completed
   (`baseDelay · 2^(attempt-1)`), default **3 attempts / 1s base**; non-transient errors
   (private/removed/geo-blocked/etc.) fail fast with no retry. Classification is a pure,
   unit-tested function (`RetryPolicy.IsTransient`); cancellation is never retried.
+
+> **M5 PR 2 amendment:** `DownloadManager` now performs **terminal-transition side
+> effects** through two optional, Core-only abstractions injected via its constructor
+> (`IHistoryService?`, `INotificationService?`, both `null` by default so Core-only
+> hosts/tests are unaffected): on `Completed` it appends a `HistoryEntry` and raises a
+> success `Notification`; on `Failed` it raises an error `Notification` only (no history
+> row); `Canceled` raises neither. The dispatch happens inside `RunAndTrackAsync` after
+> `RunAsync` completes and before the idle signal, so `IdleAsync()` observes the side
+> effects deterministically, and the call is wrapped in its own try/catch so a throwing
+> history/notification implementation can never break the queue's active-count/idle
+> bookkeeping. This is a **best-effort side effect**, not a state in the machine above —
+> the `Queued → Downloading → Processing → {Completed | Canceled | Failed}` shape, the
+> `SemaphoreSlim` concurrency cap, and per-job cancellation are all unchanged. `Download-
+> Manager` still has **no direct UI dependency** — it depends only on the Core
+> abstractions, never on WPF-UI or a ViewModel.
 
 ### 7.3 Output format matrix
 
@@ -402,6 +424,7 @@ Schema changes carry a `version` field for forward migration.
   - Format/quality selector + options (trim, subs, embed) + output folder.
   - **Queue list** with per-item progress bar, speed/ETA, pause? (stretch), cancel.
   - Footer: global actions (start all, clear completed, open folder).
+  - **Presets:** inline dropdown (apply/delete) + "save current as" — no separate screen.
 - **Settings screen:** default folder, concurrency, theme, update cadence, binary
   versions + "Update yt-dlp".
 - **History screen:** searchable list with "open file/folder" and "re-download".
@@ -412,6 +435,18 @@ Schema changes carry a `version` field for forward migration.
 > A **title-bar theme toggle** (light/dark/system, via WPF-UI `ApplicationThemeManager`)
 > also now exists and applies the persisted theme at startup. Update cadence and binary
 > version display remain planned (M5 PR 2 / M6).
+
+> **M5 PR 2 note:** **inline presets** are delivered on the Downloader screen — a
+> dropdown (`Presets`/`SelectedPreset`) plus Apply/Delete buttons and a "save current
+> config as a named preset" text box + button, all bound directly on
+> `DownloaderViewModel` (no separate presets screen, per §5 of the PR 2 spec). The
+> **History screen** is delivered (new footer nav item, above Settings) — a filterable
+> list (title/url/format substring match) backed by `IHistoryService`, with per-row
+> "open file" / "open folder" and a "clear history" action; **re-download is not yet
+> wired** (see §19). **In-app notifications** are delivered via a WPF-UI
+> `SnackbarPresenter` overlaying the shell, driven by `SnackbarNotificationService`
+> (severity → `ControlAppearance`: Success/Caution/Danger/Info); **native Windows toast
+> notifications remain deferred to M6**, unchanged from the plan.
 
 ---
 
@@ -461,7 +496,7 @@ Each milestone is a **vertical, shippable increment**.
 | **M2** | Formats | ✅ delivered (branch `feat/m2-formats`) — Full format matrix: video containers + audio-only (**wav/mp3**/m4a/opus/flac) + quality/resolution. `OptionSet` builder fully tested. |
 | **M3** | Queue | ✅ delivered (branch `feat/m3-queue`) — Download **queue** (`IDownloadManager`/`DownloadJob`, module-owned) with bounded **concurrency** (`SemaphoreSlim` cap 3), transient-only retry with exponential backoff, and **playlist/channel** expansion at add-time (one job per entry). |
 | **M4** | Processing | ✅ delivered (branch `feat/m4-processing`) — **Trim/clip** (fast keyframe cut or precise re-encode), **subtitles** (video-only, manual + auto), **metadata + thumbnail** embedding. |
-| **M5** | Experience | 🚧 in progress (branch `feat/m5-foundation`) — **PR 1 delivered:** settings persistence + theming foundation (`JsonStore<T>`, `ISettingsService`, Settings screen, dark/light/system theming). **PR 2 (planned):** presets, history, notifications. |
+| **M5** | Experience | ✅ delivered (branches `feat/m5-foundation`, `feat/m5-presets-history`) — **PR 1:** settings persistence + theming foundation (`JsonStore<T>`, `ISettingsService`, Settings screen, dark/light/system theming). **PR 2:** presets (`IPresetService`, inline Downloader UI), history (`IHistoryService`, `DownloadManager` completion hook, History screen), and in-app snackbar notifications (`INotificationService`/`SnackbarNotificationService`). Re-download from history deferred (§19). |
 | **M6** | Ship v1 | **Velopack** installer + delta auto-update, yt-dlp/ffmpeg update flow, **v1 release**. |
 | **M7** | *(future)* | Second tool module (video **standardize/merge**) — validates the modular seam. |
 
@@ -489,6 +524,22 @@ Each milestone is a **vertical, shippable increment**.
   cancel-only (per-job + cancel-all); pause/resume remains a stretch goal, revisit
   post-v1 if there's demand.
 - Which yt-dlp/ffmpeg versions to pin for v1 — set during M2, record in §9.
+- **Re-download deferred (M5 PR 2).** The History screen's "re-download" row-action
+  (§13) was **not** implemented this PR. It needs (a) a cross-page seeding seam — the
+  Downloader screen's `DownloaderViewModel` is DI-**transient**, so there's no existing
+  channel for the History page to hand it a config and navigate over — and (b) a
+  richer `HistoryEntry` that stores the **serialized `DownloadConfig`** (via
+  `PresetMapping`-style (de)serialization), not just the human-readable `Format`
+  label it carries today. Revisit alongside a broader look at cross-page
+  navigation/state-passing, rather than a one-off hack for this single action.
+- **Known follow-up:** the App-layer `HistoryViewModel` subscribes to
+  `IHistoryService.Changed` in its constructor with no matching unsubscribe, and the
+  VM is registered DI-**transient** (a fresh instance per navigation) — so repeated
+  visits to the History page accumulate handlers (a minor leak + redundant
+  `Refresh()` calls per external change), mirroring the existing pattern on other
+  App-layer VMs. Candidate fixes: register `HistoryViewModel` as a singleton, or
+  detach the subscription on the page's `Unloaded` event. Not blocking for M5; flagged
+  for a future pass.
 
 ---
 
@@ -506,6 +557,7 @@ Each milestone is a **vertical, shippable increment**.
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-07-06 | 0.8 | M5 experience (PR 2): `IPresetService`/`IHistoryService`/`INotificationService` realized. JSON-backed `PresetService`/`HistoryService` (`presets.json`/`history.json`, `Changed` events); module `PresetMapping` (de)serializes `DownloadConfig` to an opaque payload string (tolerant on malformed/blank input); `DownloaderViewModel` gains save/apply/delete preset commands + an inline Presets section on the Downloader page. `DownloadManager` gains optional `IHistoryService?`/`INotificationService?` ctor params and appends history + notifies on `Completed`, notifies only on `Failed`, does neither on `Canceled` — dispatched inside `RunAndTrackAsync` before the idle signal, swallowed on failure so a broken sink can't break the queue. App gains `SnackbarNotificationService` (WPF-UI `SnackbarPresenter`) and a **History** screen (footer nav item: filter, open file/folder, clear). Re-download from history explicitly deferred (needs cross-page seeding seam + a config-carrying `HistoryEntry`). §6/§7.2/§13/§17/§19 updated; M5 marked complete. |
 | 2026-07-06 | 0.7 | M5 foundation (PR 1): generic `JsonStore<T>` (atomic write, corrupt-file quarantine) + `AppSettings`/`ISettingsService` (JSON at %AppData%\FFMedia\settings.json). `AddFFMediaCore` gains a `dataDirectory` param and registers `ISettingsService`. App gains a `ThemeService` (dark/light/system via WPF-UI), a Settings screen (default folder, max concurrency, theme) as a footer nav item, a title-bar theme toggle, and applies the persisted theme at startup. Settings wired into behavior: downloader output folder seeded from settings; `DownloadManager` concurrency cap read from settings. §6/§10/§12/§13/§17/§19 updated. |
 | 2026-07-05 | 0.6 | M4 processing: `ProcessingOptions` (`TrimRange?`/`PreciseCut`/`EmbedSubtitles`/`SubtitleLanguage`/`EmbedMetadata`/`EmbedThumbnail`, default metadata+thumbnail on) added to `DownloadConfig.Processing`; pure `OptionSetBuilder.ApplyProcessing` emits `--download-sections` (+ `--force-keyframes-at-cuts` when precise), video-only `--write-subs --write-auto-subs --embed-subs --sub-langs`, and `--embed-metadata`/`--embed-thumbnail`; pure `TrimParsing` (HH:MM:SS/MM:SS/seconds → `TimeSpan`, range only when valid). ViewModel gained processing selections + live trim-hint validation; page gained a Processing section. §7.3/§8/§17 updated to match. |
 | 2026-07-05 | 0.5 | M3 queue: `IDownloadManager`/`DownloadJob` (module-owned, not Core) run a bounded-concurrency (`SemaphoreSlim` cap 3) download queue with auto-start on add, per-job + cancel-all cancellation, and clear-completed; `RetryPolicy` retries transient network failures with exponential backoff (3 attempts/1s base) while permanent errors fail fast; `IPlaylistProbe`/`PlaylistMapping` expand a playlist/channel URL into one job per entry at add-time. ViewModel restructured to add-to-queue with a bound `Jobs` list; page shows per-job progress/cancel + cancel-all/clear-completed. §6/§7.2/§12/§19 updated to match the realized design; §19 concurrency + pause/resume resolved. |
