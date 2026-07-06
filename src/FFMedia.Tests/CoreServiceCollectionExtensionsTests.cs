@@ -64,4 +64,16 @@ public class CoreServiceCollectionExtensionsTests
 
         Assert.Empty(history.Query());
     }
+
+    [Fact]
+    public void AddFFMediaCore_ResolvesPresetService()
+    {
+        var provider = new ServiceCollection()
+            .AddFFMediaCore(binariesDirectory: Path.GetTempPath(), dataDirectory: Path.GetTempPath())
+            .BuildServiceProvider();
+
+        var presets = provider.GetRequiredService<FFMedia.Core.Presets.IPresetService>();
+
+        Assert.Empty(presets.List());
+    }
 }

@@ -1,5 +1,6 @@
 using FFMedia.Core.Binaries;
 using FFMedia.Core.History;
+using FFMedia.Core.Presets;
 using FFMedia.Core.Settings;
 using FFMedia.Core.Tools;
 using Microsoft.Extensions.DependencyInjection;
@@ -28,6 +29,9 @@ public static class CoreServiceCollectionExtensions
         services.AddSingleton<IHistoryService>(sp => new HistoryService(
             dataDirectory,
             sp.GetService<ILogger<HistoryService>>() ?? NullLogger<HistoryService>.Instance));
+        services.AddSingleton<IPresetService>(sp => new PresetService(
+            dataDirectory,
+            sp.GetService<ILogger<PresetService>>() ?? NullLogger<PresetService>.Instance));
         return services;
     }
 }
