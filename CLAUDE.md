@@ -33,6 +33,39 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-06 — M5 Experience (PR 2: presets, history, notifications)
+
+- **Done:** Presets — `IPresetService`/`PresetService` (Core, JSON-backed via
+  `JsonStore<T>` at `presets.json`, `Changed` event) + module `PresetMapping`
+  (serializes/deserializes `DownloadConfig` to an opaque payload string, tolerant of
+  blank/malformed input) + `DownloaderViewModel` save/apply/delete preset commands +
+  an inline Presets section (dropdown, Apply/Delete, "save as") on the Downloader page
+  — no separate presets screen. History — `IHistoryService`/`HistoryService` (Core,
+  JSON-backed at `history.json`, newest-first, `Changed` event) + a `DownloadManager`
+  completion hook (two optional trailing ctor params, `IHistoryService?`/
+  `INotificationService?`): `Completed` appends a `HistoryEntry` + notifies success,
+  `Failed` notifies only (no history row), `Canceled` does neither; dispatched inside
+  `RunAndTrackAsync` before the idle signal, wrapped in try/catch so a broken sink
+  can't break the queue. A new **History** screen (footer nav, above Settings) shows a
+  filterable list with per-row open file/open folder + a clear-history action.
+  Notifications — `INotificationService` realized in the App layer as
+  `SnackbarNotificationService`, wrapping WPF-UI's `ISnackbarService` via a
+  `SnackbarPresenter` overlaying the shell (severity → Success/Caution/Danger/Info).
+  SDD → v0.8, M5 marked complete.
+- **Decisions:** re-download from history **deferred** — needs a cross-page seeding
+  seam (`DownloaderViewModel` is DI-transient, so there's no existing channel for the
+  History page to hand it a config) and a richer `HistoryEntry` that stores the
+  serialized `DownloadConfig`, not just the `Format` label; failed jobs are notified
+  but not written to history (only `Completed` rows persist); preset payload
+  deserialization is tolerant (blank/malformed → `DownloadConfig.Default`); native
+  Windows toast notifications stay deferred to M6 (in-app snackbar only, per PR 1's
+  decision). Known follow-up (non-blocking): `HistoryViewModel` subscribes to
+  `IHistoryService.Changed` with no unsubscribe and is DI-transient, so repeated page
+  visits accumulate handlers — candidate fixes are a singleton VM or detaching on
+  `Unloaded`.
+- **Next:** M6 — Velopack installer + delta auto-update, yt-dlp/ffmpeg update flow,
+  v1 release.
+
 ### 2026-07-06 — M5 Experience (PR 1: foundation)
 
 - **Done:** Persistence foundation + settings + theming. `JsonStore<T>` (Core) does
