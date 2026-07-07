@@ -84,6 +84,12 @@ public partial class App : Application
             var updates = _host.Services.GetRequiredService<FFMedia.App.ViewModels.UpdateViewModel>();
             _ = updates.CheckOnStartupAsync(); // fire-and-forget; swallows+logs its own errors
         }
+
+        if (settings.Current.CheckYtDlpForUpdatesOnStartup)
+        {
+            var binaries = _host.Services.GetRequiredService<FFMedia.App.ViewModels.BinaryUpdateViewModel>();
+            _ = binaries.CheckOnStartupAsync(); // fire-and-forget; swallows+logs its own errors
+        }
     }
 
     private static void ReportFatal(Exception? ex)
