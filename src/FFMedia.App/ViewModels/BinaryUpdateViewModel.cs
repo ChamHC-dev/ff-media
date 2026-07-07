@@ -29,7 +29,11 @@ public partial class BinaryUpdateViewModel : ObservableObject
     [ObservableProperty] private string _ffmpegVersion = "…";
     [ObservableProperty] private bool _isYtDlpUpdateAvailable;
     [ObservableProperty] private string _statusMessage = string.Empty;
-    [ObservableProperty] private bool _isBusy;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanUpdate))]
+    private bool _isBusy;
+
+    public bool CanUpdate => !IsBusy;
 
     [RelayCommand]
     private async Task RefreshVersionsAsync()
