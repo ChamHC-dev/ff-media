@@ -23,7 +23,7 @@ $releaseDir = Join-Path $root 'artifacts/releases'
 
 # 2. Publish self-contained (SDD §15). The csproj Content rule copies assets/binaries/*.exe.
 if (Test-Path $publishDir) { Remove-Item $publishDir -Recurse -Force }
-dotnet publish $proj -c Release -r $Runtime --self-contained true -o $publishDir
+dotnet publish $proj -c Release -r $Runtime --self-contained true -o $publishDir -p:Version=$Version
 
 # 3. Pack a Velopack release. UNSIGNED for v1 — add --signParams "..." here when a cert exists.
 vpk pack `
