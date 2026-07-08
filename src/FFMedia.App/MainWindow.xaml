@@ -19,11 +19,16 @@
 
         <ui:TitleBar Grid.Row="0" Title="FFMedia">
             <ui:TitleBar.Header>
-                <ui:Button Icon="{ui:SymbolIcon WeatherMoon24}"
-                           Appearance="Transparent"
-                           HorizontalAlignment="Right" Margin="0,0,8,0"
-                           ToolTip="Toggle light/dark theme"
-                           Command="{Binding ToggleThemeCommand}" />
+                <StackPanel Orientation="Horizontal"
+                            HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Image Source="pack://application:,,,/Assets/logo.png"
+                           Height="20" Margin="0,0,8,0" VerticalAlignment="Center" />
+                    <ui:Button Icon="{ui:SymbolIcon WeatherMoon24}"
+                               Appearance="Transparent"
+                               Margin="0,0,8,0"
+                               ToolTip="Toggle light/dark theme"
+                               Command="{Binding ToggleThemeCommand}" />
+                </StackPanel>
             </ui:TitleBar.Header>
         </ui:TitleBar>
 
@@ -58,12 +63,7 @@
                            MenuItemsSource="{Binding MenuItems}"
                            FooterMenuItemsSource="{Binding FooterMenuItems}"
                            IsBackButtonVisible="Collapsed"
-                           PaneDisplayMode="Left">
-            <ui:NavigationView.Header>
-                <Image Source="pack://application:,,,/Assets/logo.png"
-                       Height="28" HorizontalAlignment="Left" Margin="16,8" />
-            </ui:NavigationView.Header>
-        </ui:NavigationView>
+                           PaneDisplayMode="Left" />
 
         <ui:SnackbarPresenter Grid.Row="2" x:Name="RootSnackbar"
                               VerticalAlignment="Bottom" Margin="0,0,0,16" />

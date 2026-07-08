@@ -45,7 +45,7 @@ _Newest first. One entry per completed task/session._
   yt-dlp **2026.07.04** and ffmpeg BtbN **autobuild-2026-07-07-13-44** and **verifies SHA-256**
   (throws on mismatch). `logo.png` moved to `assets/branding/`, converted to a committed
   multi-res `app.ico` (via `build/make-icon.ps1`), and wired as the exe/window/taskbar/
-  installer icon + in-app branding (nav header + welcome page). **Verified:** Release build
+  installer icon + in-app branding (title bar, left of the theme toggle, + welcome page). **Verified:** Release build
   0/0, all **172/172** unit tests pass (`Category!=Integration`), pinned `fetch-binaries.ps1`
   runs and verifies clean. **Not verified (pending user dry-run):** headed GUI smoke of the
   Binaries section, the real `yt-dlp -U`, and the logo surfaces. SDD → v0.10.
