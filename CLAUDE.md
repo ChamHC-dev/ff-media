@@ -48,11 +48,24 @@ _Newest first. One entry per completed task/session._
      title; **removed the title-bar theme toggle** (theme already lives in Settings → Theme
      combo). Dropped `MainWindowViewModel`'s now-dead `ToggleThemeCommand` and its unused
      `ISettingsService`/`ThemeService` ctor deps.
+- **Second round (same branch/PR):**
+  4. **YouTube Downloader nav icon missing** — the tool icon was still a raw-glyph `FontIcon`
+     (same unreliable path as the footer). Reinterpreted `ITool.IconGlyph` as a WPF-UI
+     **`SymbolRegular` name** (`YouTubeDownloaderTool` → `"ArrowDownload24"`); the shell now
+     `Enum.TryParse`s it into a `SymbolIcon` (fallback `Apps24`). Core stays UI-agnostic (still
+     just a string).
+  5. **Settings Save button removed** — settings now **auto-save** on change (`On<Property>Changed`
+     → `Persist()`); theme applies live; **max concurrency** (read once at construction, §12)
+     shows a **red "takes effect after you restart"** reminder when changed from the launch value.
+     Folder box saves on focus-loss (dropped `UpdateSourceTrigger=PropertyChanged`).
+  6. **History open-file/folder feedback** — `HistoryViewModel` gained `INotificationService`;
+     a missing file/folder now raises a `Warning` notification (and, if only the file is gone,
+     opens its parent folder), plus an `Error` notification if `Process.Start` throws.
 - **Verified:** Release build **0/0**, **189/189** unit tests pass. **Not verified (headless
-  env):** the actual dark-mode appearance, icon rendering, and title-bar layout — needs a
-  user visual check. SDD → v0.10.1.
-- **Next:** user confirms the three fixes visually; delivered via branch
-  `fix/ui-dark-theme-titlebar-icons` → PR.
+  env):** the actual dark-mode appearance, all icon rendering, title-bar layout, settings
+  auto-save UX, and the History notifications — needs a user visual check. SDD → v0.10.1.
+- **Next:** user confirms the fixes visually; delivered via branch
+  `fix/ui-dark-theme-titlebar-icons` → PR #11.
 
 ### 2026-07-08 — Fix: in-app "Update check failed" after first release
 

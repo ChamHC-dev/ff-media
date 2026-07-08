@@ -12,7 +12,8 @@ public interface ITool
     /// <summary>Short description of what the tool does.</summary>
     string Description { get; }
 
-    /// <summary>Segoe Fluent Icons glyph (kept as a string so Core stays UI-agnostic).</summary>
+    /// <summary>Navigation icon as a WPF-UI <c>SymbolRegular</c> name, e.g. "ArrowDownload24"
+    /// (kept as a string so Core stays UI-agnostic; the shell resolves it to a SymbolIcon).</summary>
     string IconGlyph { get; }
 
     /// <summary>Relative ordering in the navigation pane (ascending).</summary>

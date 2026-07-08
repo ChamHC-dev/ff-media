@@ -11,6 +11,10 @@ public partial class SettingsViewModel : ObservableObject
     private readonly ISettingsService _settings;
     private readonly ThemeService _theme;
 
+    // The download manager reads the concurrency cap once at construction (§12), so a change
+    // only takes effect on next launch — compare against the value we started with.
+    private readonly int _launchMaxConcurrency;
+
     public SettingsViewModel(
         ISettingsService settings, ThemeService theme, UpdateViewModel updates, BinaryUpdateViewModel binaries)
     {
@@ -24,11 +28,14 @@ public partial class SettingsViewModel : ObservableObject
         Binaries = binaries;
 
         var current = settings.Current;
+        // Assigning the backing fields directly (not the properties) does NOT fire the
+        // On<Property>Changed hooks below, so loading settings never triggers a save.
         _defaultOutputFolder = current.DefaultOutputFolder;
         _maxConcurrency = current.MaxConcurrency;
         _selectedTheme = current.Theme;
         _checkForUpdatesOnStartup = current.CheckForUpdatesOnStartup;
         _checkYtDlpForUpdatesOnStartup = current.CheckYtDlpForUpdatesOnStartup;
+        _launchMaxConcurrency = current.MaxConcurrency;
     }
 
     [ObservableProperty] private string _defaultOutputFolder;
@@ -36,7 +43,27 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private AppTheme _selectedTheme;
     [ObservableProperty] private bool _checkForUpdatesOnStartup;
     [ObservableProperty] private bool _checkYtDlpForUpdatesOnStartup;
-    [ObservableProperty] private string _statusMessage = string.Empty;
+
+    /// <summary>True once the user changes concurrency to a value different from launch —
+    /// the UI shows a "restart required" reminder while this holds.</summary>
+    [ObservableProperty] private bool _concurrencyRestartPending;
+
+    // Every setting persists immediately as it's edited — there is no Save button.
+    partial void OnDefaultOutputFolderChanged(string value) => Persist();
+    partial void OnCheckForUpdatesOnStartupChanged(bool value) => Persist();
+    partial void OnCheckYtDlpForUpdatesOnStartupChanged(bool value) => Persist();
+
+    partial void OnSelectedThemeChanged(AppTheme value)
+    {
+        Persist();
+        _theme.Apply(value); // theme takes effect immediately
+    }
+
+    partial void OnMaxConcurrencyChanged(int value)
+    {
+        Persist();
+        ConcurrencyRestartPending = value != _launchMaxConcurrency;
+    }
 
     /// <summary>Shared update state (also drives the shell banner). Bound by the Settings "check now" UI.</summary>
     public UpdateViewModel Updates { get; }
@@ -52,23 +79,17 @@ public partial class SettingsViewModel : ObservableObject
         var dialog = new OpenFolderDialog { InitialDirectory = DefaultOutputFolder };
         if (dialog.ShowDialog() == true)
         {
-            DefaultOutputFolder = dialog.FolderName;
+            DefaultOutputFolder = dialog.FolderName; // fires OnDefaultOutputFolderChanged → Persist
         }
     }
 
-    [RelayCommand]
-    private void Save()
-    {
-        var updated = _settings.Current with
+    private void Persist() =>
+        _settings.Save(_settings.Current with
         {
             DefaultOutputFolder = DefaultOutputFolder,
             MaxConcurrency = Math.Max(1, MaxConcurrency),
             Theme = SelectedTheme,
             CheckForUpdatesOnStartup = CheckForUpdatesOnStartup,
             CheckYtDlpForUpdatesOnStartup = CheckYtDlpForUpdatesOnStartup,
-        };
-        _settings.Save(updated);
-        _theme.Apply(SelectedTheme);
-        StatusMessage = "Settings saved. Concurrency changes take effect on next launch.";
-    }
+        });
 }

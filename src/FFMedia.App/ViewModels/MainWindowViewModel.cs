@@ -32,7 +32,12 @@ public partial class MainWindowViewModel : ObservableObject
             items.Add(new NavigationViewItem
             {
                 Content = tool.DisplayName,
-                Icon = new FontIcon { Glyph = tool.IconGlyph },
+                Icon = new SymbolIcon
+                {
+                    Symbol = Enum.TryParse<SymbolRegular>(tool.IconGlyph, ignoreCase: true, out var symbol)
+                        ? symbol
+                        : SymbolRegular.Apps24,
+                },
                 TargetPageType = pageType,
             });
         }
