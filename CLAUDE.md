@@ -49,6 +49,15 @@ _Newest first. One entry per completed task/session._
   0/0, all **172/172** unit tests pass (`Category!=Integration`), pinned `fetch-binaries.ps1`
   runs and verifies clean. **Not verified (pending user dry-run):** headed GUI smoke of the
   Binaries section, the real `yt-dlp -U`, and the logo surfaces. SDD → v0.10.
+- **Review fixes (whole-branch review before opening the PR):** the GitHub latest-version
+  check now surfaces the remote tag only when **strictly newer** than installed — a new pure,
+  unit-tested `YtDlpVersion.IsNewer` (component-wise compare of the dot date tags, tolerant of
+  zero-padding skew) replaces the prior "any inequality" check that could nag forever on a
+  locally-newer install; the Core `HttpClient` gained an explicit 10 s timeout; and the
+  latest-check failure paths (HTTP error, malformed JSON, installed-is-newer) are now tested.
+  Re-verified: Release build **0/0**, **189/189** unit tests pass. Reviewer's remaining notes
+  (no `ProcessRunner` timeout, vestigial `AppSettings.Version`, `make-icon.ps1` path style)
+  were triaged as out-of-scope Minors and left for later.
 - **Decisions:** yt-dlp self-update via `yt-dlp -U`; ffmpeg has no self-update (rides app
   releases); startup check notifies only; both binaries pinned + hash-verified (ffmpeg hash
   computed once from the pinned zip); logo used everywhere. App-layer VMs verified by build +

@@ -74,7 +74,7 @@ public sealed class BinaryUpdateService : IBinaryUpdateService
             }
 
             var installed = await GetInstalledVersionAsync(ExternalBinary.YtDlp, ct).ConfigureAwait(false);
-            return string.Equals(latest, installed, StringComparison.OrdinalIgnoreCase) ? null : latest;
+            return YtDlpVersion.IsNewer(latest, installed) ? latest : null;
         }
         catch (OperationCanceledException)
         {

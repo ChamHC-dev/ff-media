@@ -29,7 +29,7 @@ public static class CoreServiceCollectionExtensions
         services.AddSingleton<IBinaryUpdateService>(sp => new BinaryUpdateService(
             sp.GetRequiredService<IProcessRunner>(),
             sp.GetRequiredService<IBinaryProvider>(),
-            new HttpClient(),
+            new HttpClient { Timeout = TimeSpan.FromSeconds(10) },
             sp.GetService<ILogger<BinaryUpdateService>>() ?? NullLogger<BinaryUpdateService>.Instance));
         services.AddSingleton<ISettingsService>(sp => new SettingsService(
             dataDirectory,

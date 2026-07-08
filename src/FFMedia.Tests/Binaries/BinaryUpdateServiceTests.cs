@@ -105,6 +105,35 @@ public class BinaryUpdateServiceTests
     }
 
     [Fact]
+    public async Task GetLatestYtDlpVersion_ReturnsNull_OnHttpError()
+    {
+        // GitHub rate-limits unauthenticated callers (60/hr) → 403; must not throw or nag.
+        var runner = new FakeProcessRunner(new ProcessResult(0, "2026.07.01", ""));
+        var http = new HttpClient(new StubHandler("rate limited", HttpStatusCode.Forbidden));
+        var svc = Make(runner, http);
+        Assert.Null(await svc.GetLatestYtDlpVersionAsync());
+    }
+
+    [Fact]
+    public async Task GetLatestYtDlpVersion_ReturnsNull_OnMalformedJson()
+    {
+        var runner = new FakeProcessRunner(new ProcessResult(0, "2026.07.01", ""));
+        var http = new HttpClient(new StubHandler("not json at all"));
+        var svc = Make(runner, http);
+        Assert.Null(await svc.GetLatestYtDlpVersionAsync());
+    }
+
+    [Fact]
+    public async Task GetLatestYtDlpVersion_ReturnsNull_WhenInstalledIsNewer()
+    {
+        // A locally-nightly install must not trigger a perpetual "update available" nag.
+        var runner = new FakeProcessRunner(new ProcessResult(0, "2026.07.10", ""));
+        var http = new HttpClient(new StubHandler("""{ "tag_name": "2026.07.04" }"""));
+        var svc = Make(runner, http);
+        Assert.Null(await svc.GetLatestYtDlpVersionAsync());
+    }
+
+    [Fact]
     public async Task UpdateYtDlp_ReportsUpdated_WhenVersionChanges()
     {
         // call order: version(before)=old, -U exit 0, version(after)=new
