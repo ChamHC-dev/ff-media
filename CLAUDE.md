@@ -33,6 +33,40 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-08 — Post-v1 UI fixes (dark-mode text, footer icons, title bar)
+
+- **Done:** three shell fixes reported after installing v1.0.0.
+  1. **Dark-mode font was black** — page `TextBlock`s had no explicit `Foreground`, so they
+     inherited WPF's default **black** (fine on light, invisible on dark). `MainWindow`
+     (`FluentWindow`) now sets `Foreground="{DynamicResource TextFillColorPrimaryBrush}"`;
+     inheritance themes all page text and buttons keep their own template foreground. This
+     also makes the (previously black-on-dark) title text visible.
+  2. **History/Settings icons missing** — swapped the raw-glyph `FontIcon`s for WPF-UI
+     `SymbolIcon` (`SymbolRegular.History24`/`Settings24`), which use the bundled icon font
+     (no dependency on an OS-installed Segoe icon font).
+  3. **Title bar** — added the logo at top-left via `ui:TitleBar.Icon` + the "FFMedia"
+     title; **removed the title-bar theme toggle** (theme already lives in Settings → Theme
+     combo). Dropped `MainWindowViewModel`'s now-dead `ToggleThemeCommand` and its unused
+     `ISettingsService`/`ThemeService` ctor deps.
+- **Second round (same branch/PR):**
+  4. **YouTube Downloader nav icon missing** — the tool icon was still a raw-glyph `FontIcon`
+     (same unreliable path as the footer). Reinterpreted `ITool.IconGlyph` as a WPF-UI
+     **`SymbolRegular` name** (`YouTubeDownloaderTool` → `"ArrowDownload24"`); the shell now
+     `Enum.TryParse`s it into a `SymbolIcon` (fallback `Apps24`). Core stays UI-agnostic (still
+     just a string).
+  5. **Settings Save button removed** — settings now **auto-save** on change (`On<Property>Changed`
+     → `Persist()`); theme applies live; **max concurrency** (read once at construction, §12)
+     shows a **red "takes effect after you restart"** reminder when changed from the launch value.
+     Folder box saves on focus-loss (dropped `UpdateSourceTrigger=PropertyChanged`).
+  6. **History open-file/folder feedback** — `HistoryViewModel` gained `INotificationService`;
+     a missing file/folder now raises a `Warning` notification (and, if only the file is gone,
+     opens its parent folder), plus an `Error` notification if `Process.Start` throws.
+- **Verified:** Release build **0/0**, **189/189** unit tests pass. **Not verified (headless
+  env):** the actual dark-mode appearance, all icon rendering, title-bar layout, settings
+  auto-save UX, and the History notifications — needs a user visual check. SDD → v0.12.
+- **Next:** user confirms the fixes visually; delivered via branch
+  `fix/ui-dark-theme-titlebar-icons` → PR #11.
+
 ### 2026-07-08 — Public-repo audit + licensing & disclaimers
 
 - **Context:** repo was made public (to fix anonymous Velopack update checks), so audited
@@ -53,8 +87,9 @@ _Newest first. One entry per completed task/session._
   vs switch to the **LGPL** build (lighter obligations, but loses GPL-only encoders). My
   recommendation: **keep GPL + comply via the notices file** unless minimizing GPL exposure
   matters more than re-encode support. `fetch-binaries.ps1` left unchanged.
-- **Next:** user picks GPL-vs-LGPL ffmpeg; note the personal git-author email is in commit
-  history (standard; only changeable going forward via a noreply address).
+- **Resolved:** user chose to **keep the GPL ffmpeg build** (comply via `THIRD-PARTY-NOTICES.md`);
+  `fetch-binaries.ps1` unchanged. Note: the personal git-author email is in commit history
+  (standard; only changeable going forward via a noreply address).
 
 ### 2026-07-08 — Fix: in-app "Update check failed" after first release
 
