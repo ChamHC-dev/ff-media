@@ -23,8 +23,9 @@ architecture, scope, and milestones.
 ## Tech stack
 
 C# / .NET 9 · WPF + WPF-UI · CommunityToolkit.Mvvm · YoutubeDLSharp · Serilog ·
-Velopack. (FFmpeg is orchestrated as a bundled external executable; an FFMpegCore
-wrapper is planned for future in-app processing tools.)
+Velopack. (`ffmpeg`/`ffprobe` are orchestrated as bundled external executables,
+driven through the app's own `IProcessRunner` seam with pure output parsers — no
+third-party ffmpeg wrapper library.)
 
 ## Roadmap (high level)
 
@@ -37,6 +38,7 @@ wrapper is planned for future in-app processing tools.)
 | M4 | Trim, subtitles, metadata/thumbnail embed |
 | M5 | Settings, presets, history, theming |
 | M6 | Installer + auto-update, v1 release |
+| M7 | Video Merger: standardize + merge local clips |
 
 ## License
 

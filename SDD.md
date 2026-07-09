@@ -1,6 +1,6 @@
 # FFMedia — Software Design Document (SDD)
 
-> **Status:** Living document · **Version:** 0.12.1 · **Last updated:** 2026-07-08
+> **Status:** Living document · **Version:** 0.13 · **Last updated:** 2026-07-10
 >
 > **This document is the single source of truth for the FFMedia project.** Any
 > architectural decision, scope change, or convention lives here first. Code and
@@ -78,7 +78,7 @@ FFMedia is, at its heart, a **polished orchestrator** over `yt-dlp` + `ffmpeg`.
 | MVVM | **CommunityToolkit.Mvvm** | Source-generated `[ObservableProperty]` / `[RelayCommand]`. |
 | App host / DI | **Microsoft.Extensions.Hosting** | Generic Host → DI, config, logging, module registration. |
 | YouTube | **[YoutubeDLSharp](https://github.com/Bluegrams/YoutubeDLSharp)** (≥1.2.0) | Wraps `yt-dlp`; built-in `Progress<DownloadProgress>` + `CancellationToken`. |
-| Media processing | **[FFMpegCore](https://github.com/rosenbjerg/FFMpegCore)** (MIT) | Fluent ffmpeg wrapper for trim + future tools. MIT license (commercial-safe). |
+| Media processing | **`ffmpeg`/`ffprobe` via `IProcessRunner`** + pure parsers (`FFMedia.Media`) | No new dependency; keeps all process work behind the fakeable seam that makes orchestration testable. **FFMpegCore was dropped in M7** — it spawns its own processes, bypassing `IProcessRunner`, and had never been referenced. |
 | Logging | **Serilog** (file + in-app sink) | Diagnose yt-dlp/ffmpeg failures from user logs. |
 | Persistence | **System.Text.Json** (settings/presets/history) | Simple; migrate history to SQLite only if it grows. |
 | Packaging / update | **[Velopack](https://velopack.io/)** (pinned **1.2.0** — NuGet package + `vpk` CLI tool, matched versions) | Installer + delta auto-update, no UAC prompt; can update bundled yt-dlp. |
@@ -86,7 +86,9 @@ FFMedia is, at its heart, a **polished orchestrator** over `yt-dlp` + `ffmpeg`.
 
 > **Rejected alternatives:** WinUI 3 (rougher windowing/packaging for a solo dev),
 > Xabe.FFmpeg (CC BY-NC-SA / non-commercial), Electron/Tauri (heavier, non-native),
-> Python/PyQt (weaker native Windows packaging story).
+> Python/PyQt (weaker native Windows packaging story), **FFMpegCore** (MIT, but it
+> manages its own child processes — using it would bypass the `IProcessRunner` seam
+> that the rest of the codebase is tested through; see §8).
 
 ---
 
@@ -107,9 +109,9 @@ abstractions, and can be developed/tested in isolation.
       ┌─────────┴───────────┬───────────────────────┐
       ▼                     ▼                        ▼
 ┌──────────────┐   ┌──────────────────┐   ┌───────────────────┐
-│ YouTube      │   │ (future) Video   │   │ (future) more     │
-│ Downloader   │   │ Standardize/Merge│   │ tools…            │
-│ (v1 module)  │   │                  │   │                   │
+│ YouTube      │   │ Video Merger     │   │ (future) more     │
+│ Downloader   │   │ standardize+merge│   │ tools…            │
+│ (v1 module)  │   │ (M7 module)      │   │                   │
 └──────┬───────┘   └──────────────────┘   └───────────────────┘
        │ uses
        ▼
@@ -119,10 +121,11 @@ abstractions, and can be developed/tested in isolation.
 │  IHistoryService · INotificationService ·                │
 │  IProcessRunner                                          │
 ├──────────────────────────────────────────────────────────┤
-│ FFMedia.Media — FFMpegCore wrappers (shared)             │
+│ FFMedia.Media — ffmpeg/ffprobe over IProcessRunner       │
 ├──────────────────────────────────────────────────────────┤
 │ Bundled binaries:  assets/binaries/yt-dlp.exe            │
 │                    assets/binaries/ffmpeg.exe            │
+│                    assets/binaries/ffprobe.exe           │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -160,15 +163,16 @@ ff-media/
 ├─ README.md
 ├─ .gitignore
 ├─ assets/
-│  └─ binaries/                  ← bundled yt-dlp.exe, ffmpeg.exe (git-ignored; fetched by build script)
+│  └─ binaries/                  ← bundled yt-dlp.exe, ffmpeg.exe, ffprobe.exe (git-ignored; fetched by build script)
 ├─ build/                        ← packaging scripts (Velopack), binary-fetch script
 ├─ docs/
 │  └─ superpowers/specs/         ← brainstorming spec record (points here)
 └─ src/
    ├─ FFMedia.App/               ← WPF shell (composition root, shell views, theming)
    ├─ FFMedia.Core/              ← abstractions + services, NO WPF references
-   ├─ FFMedia.Media/             ← FFMpegCore wrappers (shared media ops)
+   ├─ FFMedia.Media/             ← ffmpeg/ffprobe access + pure parsers (shared media ops)
    ├─ FFMedia.Tools.YouTubeDownloader/  ← v1 tool module (VMs, Views, orchestration)
+   ├─ FFMedia.Tools.VideoMerger/ ← M7 tool module (standardize + merge)
    └─ FFMedia.Tests/             ← xUnit tests (targets Core + module logic)
 ```
 
@@ -181,7 +185,7 @@ unit-test ViewModels headlessly (no window is shown).
 **Dependency rules (enforced by project references):**
 
 - `FFMedia.Core` references **no** UI framework. It is the testable heart.
-- `FFMedia.Media` references `FFMedia.Core` (+ FFMpegCore).
+- `FFMedia.Media` references `FFMedia.Core` only (no third-party media library).
 - Tool modules reference `FFMedia.Core` (+ `FFMedia.Media`, WPF-UI). They **do not**
   reference `FFMedia.App`.
 - `FFMedia.App` references `FFMedia.Core` + each tool module (composition root only).
@@ -258,8 +262,8 @@ All defined in `FFMedia.Core`, injected via DI, and fakeable in tests.
    passes the job's `CancellationToken`.
 6. **Post-process** — yt-dlp performs recode / audio-extract / trim / subtitle &
    metadata/thumbnail embed. Trim is realized via yt-dlp `--download-sections`
-   (`--force-keyframes-at-cuts` for precise cuts); the `FFMedia.Media` FFMpegCore trim
-   wrapper is reserved for future tools (see §8).
+   (`--force-keyframes-at-cuts` for precise cuts) rather than a `FFMedia.Media` pass
+   (see §8).
 7. **Complete** — notify, write to history, expose "Open folder" / "Open file".
 
 ### 7.2 Job state machine
@@ -337,26 +341,39 @@ The `OptionSet` builder is a **pure function** `DownloadConfig → yt-dlp args`
 
 ## 8. Media Processing (`FFMedia.Media`)
 
-Thin, testable wrappers over **FFMpegCore** for operations FFMedia performs
-directly (as opposed to delegating to yt-dlp):
+The shared, UI-free layer for operations FFMedia performs **directly** with
+`ffmpeg`/`ffprobe` (as opposed to delegating to yt-dlp). It is realized in **M7**
+and is deliberately tool-agnostic — a third tool should reuse it untouched.
 
-- Frame-accurate **trim/clip** (with or without re-encode).
-- Probe media info (duration, streams) when needed independent of yt-dlp.
-- **Foundation for future tools** (standardize resolution/FPS/format, concat/merge).
+| Type | Kind | Responsibility |
+|---|---|---|
+| `MediaInfo` | record | `Duration`, `ContainerFormat`, `VideoStreamInfo?` (w/h, frame rate, codec, pixel format, rotation), `AudioStreamInfo?` (codec, sample rate, channels) |
+| `IMediaAnalyzer` → `FfprobeMediaAnalyzer` | service | `ffprobe -v quiet -print_format json -show_format -show_streams` → `Result<MediaInfo>` |
+| `FfprobeParsing` | **pure** | ffprobe JSON → `MediaInfo` |
+| `IFfmpegRunner` → `FfmpegRunner` | service | Runs ffmpeg with an arg list + `-progress pipe:1 -nostats`; streams progress; honors `CancellationToken`; captures the stderr tail on failure |
+| `FfmpegProgressParsing` | **pure** | `out_time_us=…` / `speed=…` lines → `FfmpegProgress(Position, Speed)` |
 
-`FFMedia.Media` locates `ffmpeg.exe` through `IBinaryProvider` (no PATH assumption).
+Both services locate their binary through `IBinaryProvider` (no PATH assumption).
+
+> **M7 decision — FFMpegCore dropped.** Earlier versions of this document planned
+> thin wrappers over **FFMpegCore**. It was never referenced in code, and it manages
+> its **own** child processes — adopting it would bypass `IProcessRunner`, the seam
+> that makes every other orchestration path in this codebase testable without real
+> binaries (§6, §14). Driving `ffmpeg`/`ffprobe` through `IProcessRunner` with **pure
+> parsers** adds no dependency and matches the existing `FfmpegVersionParsing`
+> precedent in Core. §3 updated to match.
 
 > **M4 note:** the YouTube Downloader's trim/clip feature (§7.3) is realized via yt-dlp's
 > own `--download-sections` (+ `--force-keyframes-at-cuts` for a precise cut) rather than a
-> post-download `FFMedia.Media` pass — it's simpler and avoids a redundant re-encode. The
-> `FFMpegCore`-backed trim wrapper described above stays a reserved foundation for future
-> tools that need frame-accurate cutting independent of yt-dlp.
+> post-download `FFMedia.Media` pass — it's simpler and avoids a redundant re-encode.
+> Frame-accurate trimming independent of yt-dlp remains a candidate addition to this
+> layer if a future tool needs it.
 
 ---
 
 ## 9. Binary Management
 
-- **Bundling:** `yt-dlp.exe` and `ffmpeg.exe` ship in the installer under
+- **Bundling:** `yt-dlp.exe`, `ffmpeg.exe`, and `ffprobe.exe` ship in the installer under
   `assets/binaries/`. They are **git-ignored**; a `build/fetch-binaries` script
   downloads pinned versions for local dev and CI.
 - **Resolution:** `IBinaryProvider` resolves the app-relative binary path at
@@ -378,6 +395,14 @@ directly (as opposed to delegating to yt-dlp):
   `f9fdfc417d5091cb3a3487b484ee824bce4fd6fa92dc85a412142f2911b7a22c`). Both are
   verified by `build/fetch-binaries.ps1` (throws on hash mismatch), satisfying the
   "integrity checks in the build script" requirement in §16.
+
+> **M7 note:** media probing (`IMediaAnalyzer`, §8) requires **`ffprobe.exe`**, which
+> earlier milestones did not ship. It already lives **inside the same pinned,
+> SHA-256-verified BtbN zip** as `ffmpeg.exe`, so `fetch-binaries.ps1` simply extracts a
+> second executable from the already-verified archive — **no new download and no new
+> pinned hash**. `ExternalBinary` gains an `Ffprobe` member; the `FFMedia.App` /
+> `FFMedia.Tests` copy glob is already `assets/binaries/*.exe`, so `ffprobe.exe` reaches
+> the output directory and the Velopack package with no build-script change.
 
 > **M6 PR 1 note:** the **app** update path is now **realized**. `VelopackUpdateService`
 > performs a Velopack check-on-startup (gated by `AppSettings.CheckForUpdatesOnStartup`,
@@ -410,6 +435,7 @@ All under `%AppData%\FFMedia\`:
 | `settings.json` | Default output folder, concurrency, theme, update prefs | JSON |
 | `presets.json` | Named download presets | JSON |
 | `history.json` | Completed downloads (title, url, path, format, timestamp) | JSON → SQLite if it grows |
+| `encode-speed.json` | `SpeedProfile` — rolling average of measured encode throughput per `(videoCodec, pixelBucket)`, used for the M7 merge-time estimate | JSON |
 | `logs/ffmedia-*.log` | Rolling Serilog logs | text |
 
 Schema changes carry a `version` field for forward migration.
@@ -602,6 +628,11 @@ Schema changes carry a `version` field for forward migration.
   `win64-lgpl` build would lighten this to an LGPL notice but drops GPL-only encoders
   (e.g. x264/x265) — only relevant if a tool ever **re-encodes** video (the current
   downloader muxes/stream-copies, but `PreciseCut` can trigger a re-encode).
+  **As of M7 this is no longer hypothetical:** the Video Merger's normalize phase
+  re-encodes non-conforming clips with x264/x265, so the **GPL build is load-bearing**
+  and the LGPL variant is no longer a drop-in alternative. `ffprobe.exe` (added in M7,
+  §9) comes from the same GPL build and carries the same obligation — recorded in
+  `THIRD-PARTY-NOTICES.md`.
 
 > **M6 PR 2 note (realized):** `build/fetch-binaries.ps1` pins `yt-dlp` **2026.07.04**
 > and the `ffmpeg` BtbN build **autobuild-2026-07-07-13-44**, downloads both over
@@ -623,7 +654,7 @@ Each milestone is a **vertical, shippable increment**.
 | **M4** | Processing | ✅ delivered (branch `feat/m4-processing`) — **Trim/clip** (fast keyframe cut or precise re-encode), **subtitles** (video-only, manual + auto), **metadata + thumbnail** embedding. |
 | **M5** | Experience | ✅ delivered (branches `feat/m5-foundation`, `feat/m5-presets-history`) — **PR 1:** settings persistence + theming foundation (`JsonStore<T>`, `ISettingsService`, Settings screen, dark/light/system theming). **PR 2:** presets (`IPresetService`, inline Downloader UI), history (`IHistoryService`, `DownloadManager` completion hook, History screen), and in-app snackbar notifications (`INotificationService`/`SnackbarNotificationService`). Re-download from history deferred (§19). |
 | **M6** | Ship v1 | 🚧 **in progress** — **PR 1 delivered** (branch `feat/m6-packaging-autoupdate`): Velopack packaging (`build/pack.ps1`, tag-gated `release.yml`) + app delta auto-update (`IUpdateService`/`VelopackUpdateService`, shell update banner, Settings toggle + check-now). **PR 2 delivered** (branch `feat/m6-binary-updates`): yt-dlp self-update (`IProcessRunner`/`IBinaryUpdateService`), Settings **Binaries** section, pinned + SHA-256-verified `fetch-binaries.ps1`, and the app logo. **Remaining:** the public **v1.0.0** release tag stays **user-initiated**. |
-| **M7** | *(future)* | Second tool module (video **standardize/merge**) — validates the modular seam. |
+| **M7** | Video Merger | 📐 **designed** ([spec](docs/superpowers/specs/2026-07-10-m7-video-merger-design.md)) — second tool module (`FFMedia.Tools.VideoMerger`), validating the modular seam. Ingest local clips → auto-derived, user-overridable standardization target → normalize non-conforming clips (bounded concurrency) → stream-copy concat. Ordering manual / random / random-with-locks; pre-merge output duration + estimated merge time; live progress; cancel. Realizes `FFMedia.Media` (§8) and adds `ffprobe.exe` (§9). **PR 1** = engine (no UI); **PR 2** = module VM + page + nav. |
 
 ---
 
@@ -660,6 +691,13 @@ Each milestone is a **vertical, shippable increment**.
   `PresetMapping`-style (de)serialization), not just the human-readable `Format`
   label it carries today. Revisit alongside a broader look at cross-page
   navigation/state-passing, rather than a one-off hack for this single action.
+- **M7 deferrals (recorded, not open):** **transitions/crossfades** (force the
+  `filter_complex xfade` path, eliminate the stream-copy fast path, and break
+  `outputDuration = Σ inputDurations`); **per-clip trim** (needs a preview scrubber to
+  be usable, not blind timecode entry); **per-clip fit mode** (one `FitMode` per merge
+  for now); **background music / audio replacement** (arguably its own tool); and a
+  **merge queue** (`IMergeManager`) — one merge already saturates the CPU, since the
+  concurrency lives inside the normalize phase. Revisit any of these on demand.
 - **Known follow-up:** the App-layer `HistoryViewModel` subscribes to
   `IHistoryService.Changed` in its constructor with no matching unsubscribe, and the
   VM is registered DI-**transient** (a fresh instance per navigation) — so repeated
@@ -685,6 +723,7 @@ Each milestone is a **vertical, shippable increment**.
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-07-10 | 0.13 | **M7 designed** — second tool module, `FFMedia.Tools.VideoMerger` (full spec: `docs/superpowers/specs/2026-07-10-m7-video-merger-design.md`). Ingest local clips → **auto-derived, user-overridable** standardization target (resolution/FPS/codecs/audio layout) → **normalize only non-conforming clips** to temp intermediates under a `SemaphoreSlim` cap (the §12 pattern) → **stream-copy `concat`**. When every clip already conforms, normalization is skipped entirely and the merge is a ~1 s copy (**fast path**). Aspect mismatch defaults to **letterbox/pillarbox**, with a per-merge `FitMode` (Fit / Fill+Crop / Stretch); clips lacking an audio track get a synthesized `anullsrc` silent track so `concat`'s identical-stream-layout requirement holds. Ordering is manual (drag/move), random, or **random with clips locked to specific indices** (seeded Fisher–Yates ⇒ deterministic tests). Pre-merge the UI shows **exact output duration** (Σ clip durations — no transitions) plus an **estimated merge time as a range**, derived from a `SpeedProfile` rolling average of the user's own measured encode throughput (new `encode-speed.json`, §10) and **replaced by ffmpeg's real ETA** once merging starts; a **disk-space guard** fails fast before any encoding if the temp volume can't hold the intermediates. Live weighted progress (encode ≈ 95 %, concat ≈ 5 %) and cancel; temp cleanup on every exit path. **§3/§8: FFMpegCore dropped** — never referenced, and it manages its own child processes, bypassing the `IProcessRunner` seam; `FFMedia.Media` is instead realized as `IMediaAnalyzer`/`IFfmpegRunner` over `IProcessRunner` with pure `FfprobeParsing`/`FfmpegProgressParsing`. **§9: `ffprobe.exe` added**, extracted from the *same* pinned, SHA-256-verified BtbN zip (no new download, no new hash). §4/§5/§10/§17/§19 updated; M7 deferrals recorded (transitions, per-clip trim, per-clip fit, background music, merge queue). Delivery: **PR 1** engine (no UI), **PR 2** module VM + page + nav. Design only — no code in this change. |
 | 2026-07-08 | 0.12.1 | Docs: added a **"personal project" scope note** — FFMedia is built primarily for the author's personal use and published as-is, with no maintenance/support commitment. Surfaced in the README (a `> [!NOTE]` callout under the intro + a Legal bullet) and SDD §1. No code change. |
 | 2026-07-08 | 0.12 | Post-v1 UI fixes (shell). (1) **Dark-mode text was black:** page `TextBlock`s inherited WPF's default black `Foreground`; the `FluentWindow` now sets `Foreground="{DynamicResource TextFillColorPrimaryBrush}"` so text follows the theme and updates live on theme switch. (2) **Missing footer icons:** History/Settings nav items switched from raw-glyph `FontIcon` to WPF-UI `SymbolIcon` (`SymbolRegular.History24`/`Settings24`, bundled font — no OS-font dependency). (3) **Title bar:** added the logo via `ui:TitleBar.Icon` + "FFMedia" title at top-left; **removed the title-bar theme toggle** (theme already lives in Settings), dropping `MainWindowViewModel`'s now-unused `ToggleThemeCommand` + `ISettingsService`/`ThemeService` deps. (4) **Tool nav icon:** `ITool.IconGlyph` reinterpreted as a **`SymbolRegular` name** (e.g. `ArrowDownload24`), resolved by the shell to a `SymbolIcon` (`Enum.TryParse`, fallback `Apps24`) so the YouTube Downloader icon renders reliably — Core still exposes only a string. (5) **Settings auto-save:** removed the Save button — each setting persists on change via `On<Property>Changed` hooks, theme applies immediately, and **max concurrency** shows a red "takes effect after you restart" reminder (it's read once at construction, §12). (6) **History feedback:** `HistoryViewModel` now takes `INotificationService`; open-file/open-folder raise a `Warning` notification when the file/folder is missing (opening the parent folder if only the file is gone) and an `Error` if the shell launch throws. Release build 0/0, 189/189 unit tests pass; GUI appearance pending user visual check (headless dev env). §4.1/§13 updated. |
 | 2026-07-08 | 0.11 | Public-repo licensing & disclaimers (audit after making the repo public). Added **`LICENSE`** (MIT — covers FFMedia's own source only) and **`THIRD-PARTY-NOTICES.md`** (yt-dlp = Unlicense; bundled **FFmpeg** = GPL-3.0 `win64-gpl` build, with corresponding-source links + trademark/non-affiliation notes; NuGet deps + their licenses). Expanded README with a **License** section and a fuller **Legal & disclaimer** (responsible use, no DRM circumvention, non-affiliation with YouTube/Google/FFmpeg/yt-dlp, no-warranty) and corrected the tech-stack list (FFMpegCore is planned, not yet referenced). §16 documents the MIT + GPL split and the FFmpeg process-isolation (mere aggregation) reasoning. Security/PII audit found **no secrets, credentials, or machine-specific paths** in tracked files. |

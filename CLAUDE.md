@@ -33,6 +33,41 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-10 — M7 Video Merger: design (spec only, no code)
+
+- **Done:** brainstormed and specced FFMedia's **second tool module**,
+  `FFMedia.Tools.VideoMerger` → `docs/superpowers/specs/2026-07-10-m7-video-merger-design.md`.
+  Flow: ingest local clips → probe → **auto-derived, user-overridable** standardization
+  target → normalize **only non-conforming** clips to temp intermediates (bounded
+  concurrency, the §12 `SemaphoreSlim` pattern) → **stream-copy `concat`**. When every clip
+  already conforms, normalization is skipped and the merge is a ~1 s copy (**fast path**).
+- **Decisions (user-approved):** aspect mismatch → **letterbox/pillarbox** default with a
+  per-merge `FitMode` (Fit/Fill+Crop/Stretch); clips with **no audio** get a synthesized
+  `anullsrc` silent track (so `concat`'s identical-stream-layout requirement holds); merge-time
+  estimate is a **calibrated heuristic shown as a range**, backed by a persisted `SpeedProfile`
+  rolling average of the user's own measured throughput (new `encode-speed.json`), and
+  **replaced by ffmpeg's real ETA** once merging starts; **disk-space guard** fails fast before
+  any encoding; ordering is manual / random / **random-with-locks** (seeded Fisher–Yates ⇒
+  deterministic tests); **one merge at a time** (no `IMergeManager` — the concurrency lives
+  inside the normalize phase); reuse existing history/notifications/settings; drag-to-reorder in.
+  **Deferred:** transitions/crossfades, per-clip trim, per-clip fit mode, background music.
+- **Two consequential findings:** (1) **FFMpegCore dropped** — listed in SDD §3 since v0.1 but
+  never referenced, and it manages its own child processes, which would bypass the
+  `IProcessRunner` seam the codebase is tested through; `FFMedia.Media` (an empty shell until
+  now) is instead realized as `IMediaAnalyzer`/`IFfmpegRunner` over `IProcessRunner` + pure
+  `FfprobeParsing`/`FfmpegProgressParsing`. (2) **`ffprobe.exe` is not currently shipped** —
+  it lives inside the *same* pinned, SHA-256-verified BtbN zip, so it's a second extraction,
+  **no new download or hash**.
+- **Verified:** `MergeDuplicate24` (my first icon pick) **does not exist** in `Wpf.Ui.dll`
+  4.3.0 — checked the assembly; spec uses `VideoClipMultiple24`. No build/tests run: this
+  change is documentation only, no code touched.
+- **Docs updated:** SDD → **v0.13** (§3 stack, §4 diagram, §5 structure + dep rule, §7.1,
+  §8 rewritten, §9 ffprobe, §10 `encode-speed.json`, §16 **GPL build is now load-bearing**
+  since the merger re-encodes with x264/x265, §17 M7 row, §19 deferrals, Changelog);
+  README (tech stack + roadmap); `THIRD-PARTY-NOTICES.md` (ffprobe under the same GPL build).
+- **Next:** user reviews the spec → then `writing-plans` for the M7 PR 1 (engine) implementation
+  plan. Delivered via branch `docs/m7-video-merger-design` → PR.
+
 ### 2026-07-08 — Docs: "personal project" scope note
 
 - **Done:** added a note that FFMedia, though public, is developed primarily for the author's
