@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Downloads PINNED yt-dlp.exe and ffmpeg.exe into assets/binaries/ and verifies SHA-256.
+  Downloads PINNED yt-dlp.exe, ffmpeg.exe and ffprobe.exe into assets/binaries/ and verifies SHA-256.
 .NOTES
   Versions/hashes are pinned for reproducible builds (SDD §9, §16). yt-dlp's hash is
   cross-checked against its official SHA2-256SUMS; ffmpeg's is computed from the pinned
@@ -45,8 +45,9 @@ Write-Host "Downloading yt-dlp $YtDlpVersion -> $ytdlp"
 Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/download/$YtDlpVersion/yt-dlp.exe" -OutFile $ytdlp
 Assert-Hash -Path $ytdlp -Expected $YtDlpSha256 -Name 'yt-dlp.exe'
 
-# --- ffmpeg (pinned BtbN gpl build; verify the zip, then extract ffmpeg.exe) ---
-$ffmpegExe = Join-Path $OutDir 'ffmpeg.exe'
+# --- ffmpeg + ffprobe (pinned BtbN gpl build; verify the zip once, then extract both exes) ---
+$ffmpegExe  = Join-Path $OutDir 'ffmpeg.exe'
+$ffprobeExe = Join-Path $OutDir 'ffprobe.exe'
 $tmpZip = Join-Path $env:TEMP ("ffmpeg-" + [guid]::NewGuid().ToString('N') + '.zip')
 $tmpDir = Join-Path $env:TEMP ("ffmpeg-" + [guid]::NewGuid().ToString('N'))
 try {
@@ -54,10 +55,12 @@ try {
     Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/$FfmpegTag/$FfmpegAsset" -OutFile $tmpZip
     Assert-Hash -Path $tmpZip -Expected $FfmpegZipSha256 -Name 'ffmpeg zip'
     Expand-Archive -Path $tmpZip -DestinationPath $tmpDir -Force
-    $found = Get-ChildItem -Path $tmpDir -Recurse -Filter 'ffmpeg.exe' | Select-Object -First 1
-    if (-not $found) { throw "ffmpeg.exe not found in downloaded archive." }
-    Copy-Item -Path $found.FullName -Destination $ffmpegExe -Force
-    Write-Host "Extracted ffmpeg -> $ffmpegExe"
+    foreach ($pair in @(@('ffmpeg.exe', $ffmpegExe), @('ffprobe.exe', $ffprobeExe))) {
+        $found = Get-ChildItem -Path $tmpDir -Recurse -Filter $pair[0] | Select-Object -First 1
+        if (-not $found) { throw "$($pair[0]) not found in downloaded archive." }
+        Copy-Item -Path $found.FullName -Destination $pair[1] -Force
+        Write-Host "Extracted $($pair[0]) -> $($pair[1])"
+    }
 }
 finally {
     Remove-Item -Path $tmpZip -Force -ErrorAction SilentlyContinue
@@ -67,3 +70,4 @@ finally {
 Write-Host "`nResolved versions:"
 & $ytdlp --version
 & $ffmpegExe -version | Select-Object -First 1
+& $ffprobeExe -version | Select-Object -First 1

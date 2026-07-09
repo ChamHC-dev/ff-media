@@ -8,6 +8,7 @@ public sealed class BundledBinaryProvider : IBinaryProvider
         {
             [ExternalBinary.YtDlp] = "yt-dlp.exe",
             [ExternalBinary.Ffmpeg] = "ffmpeg.exe",
+            [ExternalBinary.Ffprobe] = "ffprobe.exe",
         };
 
     private readonly string _binariesDirectory;
