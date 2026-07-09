@@ -20,8 +20,8 @@ into the installer.
 - **Project:** https://ffmpeg.org/
 - **License:** **GNU General Public License, version 3 (GPL-3.0)**. FFMedia
   ships the BtbN `win64-gpl` build, which enables GPL-licensed components
-  (e.g. x264/x265). That build, and therefore the bundled `ffmpeg.exe`, is
-  covered by the GPL — **not** by FFMedia's MIT license.
+  (e.g. x264/x265). That build, and therefore the bundled `ffmpeg.exe` **and
+  `ffprobe.exe`**, is covered by the GPL — **not** by FFMedia's MIT license.
 - **Build source:** https://github.com/BtbN/FFmpeg-Builds
 - **Corresponding source:** The complete corresponding source for the exact
   FFmpeg version bundled is available from https://ffmpeg.org/download.html and
@@ -31,10 +31,9 @@ into the installer.
   FFmpeg project. FFMedia is **not affiliated with or endorsed by** the FFmpeg
   project.
 
-> If you redistribute FFMedia (or its installer), you redistribute this GPL
-> `ffmpeg.exe` and must comply with the GPL for that binary — keep this notice
-> and make the corresponding FFmpeg source available (the links above satisfy
-> this).
+> If you redistribute FFMedia (or its installer), you redistribute these GPL
+> binaries and must comply with the GPL for them — keep this notice and make the
+> corresponding FFmpeg source available (the links above satisfy this).
 
 ### yt-dlp
 
