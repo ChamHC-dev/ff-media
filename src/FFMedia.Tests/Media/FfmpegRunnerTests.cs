@@ -53,17 +53,14 @@ public class FfmpegRunnerTests
 
         var result = await ffmpeg.RunAsync(["-i", "a.mp4", "out.mkv"]);
 
+        // Pin the exact argv. ffmpeg is order-sensitive, and a Contains-style assertion
+        // passes wherever a flag lands -- including after the output file, where -y no
+        // longer suppresses the overwrite prompt.
         Assert.True(result.IsSuccess);
         Assert.Equal(@"C:\bin\Ffmpeg.exe", runner.FileName);
-        Assert.Equal("-hide_banner", runner.Arguments[0]);
-        Assert.Contains("-nostdin", runner.Arguments);
-        Assert.Contains("-y", runner.Arguments);
-        Assert.Contains("-nostats", runner.Arguments);
-        var progressFlag = runner.Arguments.IndexOf("-progress");
-        Assert.True(progressFlag >= 0);
-        Assert.Equal("pipe:1", runner.Arguments[progressFlag + 1]);
-        // caller args survive, in order
-        Assert.True(runner.Arguments.IndexOf("-i") < runner.Arguments.IndexOf("a.mp4"));
+        Assert.Equal(
+            ["-hide_banner", "-nostdin", "-y", "-i", "a.mp4", "out.mkv", "-progress", "pipe:1", "-nostats"],
+            runner.Arguments);
     }
 
     // Note: the sink below is a synchronous IProgress<T>. Do not use BCL Progress<T> here —
@@ -115,10 +112,12 @@ public class FfmpegRunnerTests
 
         var result = await ffmpeg.RunAsync(["-i", "a.mp4"]);
 
+        // Assert the whole tail, in order: a reversed tail still contains every expected
+        // line, so a Contains-only assertion would let ffmpeg's diagnostics ship backwards.
+        var expected = string.Join('\n', Enumerable.Range(11, 10).Select(i => $"line {i}"));
+
         Assert.False(result.IsSuccess);
-        Assert.Contains("line 20", result.Error!);
-        Assert.Contains("line 11", result.Error!);
-        Assert.DoesNotContain("line 10", result.Error!);
+        Assert.Equal($"ffmpeg failed (exit 1):\n{expected}", result.Error);
     }
 
     [Fact]
