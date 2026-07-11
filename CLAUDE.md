@@ -33,6 +33,41 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-11 — M7 PR 1: Video Merger engine (no UI)
+
+- **Done:** realized `FFMedia.Media` — `IMediaAnalyzer`/`FfprobeMediaAnalyzer` over ffprobe,
+  `IFfmpegRunner`/`FfmpegRunner` with `-progress` streaming + a stderr tail on failure, and the pure
+  `FfprobeParsing` / `FfmpegProgressAccumulator` — and built the new `FFMedia.Tools.VideoMerger`
+  engine: target derivation, `ConformanceCheck`, normalize/concat arg builders, seeded shuffle with
+  locked indices, `MergeEstimator` + `SpeedProfile` (`encode-speed.json`), `DiskSpaceGuard`,
+  `TempDirectorySweeper`, and `MergeService` (preflight → bounded-concurrency normalize →
+  stream-copy concat, temp cleanup on **every** exit path). Added `ExternalBinary.Ffprobe` +
+  `fetch-binaries.ps1` extraction from the same pinned, SHA-256-verified zip, and a non-generic
+  `Result` in Core. `AddVideoMergerEngine` wires it all up.
+- **The keystone invariant:** `MergeEstimator` and `MergeService` both **call** `ConformanceCheck`
+  rather than re-implementing "does this clip need re-encoding". If they ever disagreed, the ETA,
+  the fast-path promise and the disk reservation would describe a different plan than the one that
+  runs. A false *conforming* is the dangerous direction — it stream-copies a mismatched clip into
+  `concat` and corrupts the output.
+- **The bug worth remembering:** cancelling a token does **not** synchronously dequeue a pending
+  `SemaphoreSlim.WaitAsync` waiter — the cancellation's node-removal continuation is queued to the
+  thread pool, so a `Release()` microseconds later still hands the permit to the cancelled waiter,
+  which then launches a **full ffmpeg encode** for a merge the user already cancelled. It showed up
+  as a 1-in-5 flake; a 200-iteration harness proved 197/200 runs launched the extra encode. Fixed by
+  re-checking the token *after* acquiring the gate.
+- **Verified:** Release build **0/0**; **414/414** unit tests pass (`Category!=Integration`). Each
+  task was reviewed by an independent agent that mutation-tested the tests — which caught three
+  suites that passed against a deliberately broken implementation (a reversed stderr tail, a biased
+  Fisher–Yates, a per-progress-line speed sample). Argv was additionally validated end-to-end against
+  a real ffmpeg 8.1 for both the normalize and concat phases.
+- **Not verified:** a real end-to-end merge driven from the app — there is **no UI in this PR** (no
+  ViewModels, no XAML, no `ITool`/nav registration, deliberately: the shell must not navigate to a
+  page that does not exist) and no integration test. That lands with PR 2.
+- **Next:** M7 PR 2 — `MergerViewModel`, `MergerPage`, `ITool`/nav registration, history +
+  notifications wiring, the override UI (which must expose Opus — `Derive` never votes for it), and
+  a trait-gated integration test merging three real `testsrc` clips. SDD → **v0.14**. Delivered via
+  branch `feat/m7-merge-engine` → PR.
+
 ### 2026-07-10 — M7 Video Merger: design (spec only, no code)
 
 - **Done:** brainstormed and specced FFMedia's **second tool module**,
