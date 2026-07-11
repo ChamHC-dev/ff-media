@@ -132,6 +132,14 @@ public partial class MergerViewModel : ObservableObject
             return; // nothing to permute — and Ordering would be asked to shuffle a single slot
         }
 
+        // Capture the locks BEFORE consulting them, not just after we rearrange. The page's lock
+        // toggle two-way binds a checkbox straight to IsLocked, which does not go through SetLock,
+        // so a freshly-ticked row has IsLocked = true but LockedIndex = null. Ordering.Shuffle reads
+        // only LockedIndex — so without this the "locked" row would be shuffled like any other and
+        // the lock then re-pinned to wherever it randomly landed. That is worse than the lock doing
+        // nothing: the user asked for one thing and got the opposite.
+        ResyncLocks();
+
         var shuffled = Ordering.Shuffle([.. Clips], c => c.LockedIndex, ShuffleSeed);
 
         // Selection-sort the live collection into the shuffled order: everything below i is already

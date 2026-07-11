@@ -125,6 +125,19 @@ public class MergerViewModelTests
         return new Harness(vm, analyzer, merger, history, notifications, settings);
     }
 
+    /// <summary>A harness holding exactly these clips, in this order, by file name.</summary>
+    private static async Task<Harness> BuildWithAsync(params string[] names)
+    {
+        var h = Build();
+        foreach (var name in names)
+        {
+            h.Analyzer.Returns($@"C:\{name}", Info());
+        }
+
+        await h.Vm.AddClipsAsync(names.Select(name => $@"C:\{name}"));
+        return h;
+    }
+
     private static async Task<Harness> BuildWithClipsAsync(int count)
     {
         var h = Build();
@@ -277,6 +290,51 @@ public class MergerViewModelTests
         h.Vm.MoveUp(h.Vm.Clips[0]);   // already first — a no-op, not a crash
         h.Vm.MoveDown(h.Vm.Clips[1]); // already last
         Assert.Equal(new[] { "a.mp4", "b.mp4" }, Names(h.Vm));
+    }
+
+    [Fact]
+    public async Task MoveUp_AtTheTop_DoesNothing_RatherThanWrappingToTheBottom()
+    {
+        // Asserted on its own, with THREE clips. The previous test could not catch a wrap-around:
+        // with two clips, a wrapping MoveUp followed by a wrapping MoveDown cancel out, and the
+        // list looks untouched. The bug it hides is loud — clicking "move up" on the top clip
+        // teleports it to the bottom.
+        var h = await BuildWithAsync("a.mp4", "b.mp4", "c.mp4");
+
+        h.Vm.MoveUp(h.Vm.Clips[0]);
+
+        Assert.Equal(new[] { "a.mp4", "b.mp4", "c.mp4" }, Names(h.Vm));
+    }
+
+    [Fact]
+    public async Task MoveDown_AtTheBottom_DoesNothing_RatherThanWrappingToTheTop()
+    {
+        var h = await BuildWithAsync("a.mp4", "b.mp4", "c.mp4");
+
+        h.Vm.MoveDown(h.Vm.Clips[2]);
+
+        Assert.Equal(new[] { "a.mp4", "b.mp4", "c.mp4" }, Names(h.Vm));
+    }
+
+    [Fact]
+    public async Task Shuffle_HonorsALockSetByBindingIsLockedDirectly_NotJustSetLock()
+    {
+        // The page's lock toggle two-way binds a checkbox to IsLocked — the obvious thing to do, and
+        // it does NOT go through SetLock, so LockedIndex stays null. Ordering.Shuffle reads only
+        // LockedIndex, so without a resync the "locked" row would be shuffled like any other and the
+        // lock then re-pinned to wherever it randomly landed: worse than the lock doing nothing.
+        var h = await BuildWithAsync("a.mp4", "b.mp4", "c.mp4", "d.mp4", "e.mp4", "f.mp4");
+        h.Vm.Clips[2].IsLocked = true; // straight at the property, as a binding would
+        Assert.Null(h.Vm.Clips[2].LockedIndex);
+
+        for (var seed = 0; seed < 25; seed++)
+        {
+            h.Vm.ShuffleSeed = seed;
+            h.Vm.Shuffle();
+
+            Assert.Equal("c.mp4", h.Vm.Clips[2].FileName);
+            Assert.Equal(6, Names(h.Vm).Distinct().Count());
+        }
     }
 
     [Fact]
