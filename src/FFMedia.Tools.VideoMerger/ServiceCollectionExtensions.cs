@@ -1,0 +1,66 @@
+using System.IO;
+using FFMedia.Core.Binaries;
+using FFMedia.Core.Processes;
+using FFMedia.Media;
+using FFMedia.Tools.VideoMerger.Services;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace FFMedia.Tools.VideoMerger;
+
+/// <summary>Registers the Video Merger engine. The <c>ITool</c>/<c>IToolPage</c> registration lands
+/// with the UI in PR 2 — the module has no page yet, and the shell must not try to navigate to one.</summary>
+public static class ServiceCollectionExtensions
+{
+    /// <param name="services">The app's service collection. Must already have <c>AddFFMediaCore</c>
+    /// applied: the analyzer and the ffmpeg runner resolve Core's <see cref="IProcessRunner"/> and
+    /// <see cref="IBinaryProvider"/>.</param>
+    /// <param name="dataDirectory">Where <c>encode-speed.json</c> lives, e.g. <c>%AppData%\FFMedia</c>.</param>
+    /// <param name="tempRoot">Root for <c>merge-&lt;guid&gt;</c> working directories, e.g. <c>%Temp%\FFMedia</c>.</param>
+    /// <param name="maxConcurrency">Simultaneous clip normalizations (SDD §12).</param>
+    public static IServiceCollection AddVideoMergerEngine(
+        this IServiceCollection services, string dataDirectory, string tempRoot, int maxConcurrency)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(dataDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tempRoot);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxConcurrency, 1);
+
+        services.AddSingleton<IMediaAnalyzer>(sp => new FfprobeMediaAnalyzer(
+            sp.GetRequiredService<IProcessRunner>(), sp.GetRequiredService<IBinaryProvider>()));
+        services.AddSingleton<IFfmpegRunner>(sp => new FfmpegRunner(
+            sp.GetRequiredService<IProcessRunner>(), sp.GetRequiredService<IBinaryProvider>()));
+        services.AddSingleton<ISpeedProfileStore>(sp => new SpeedProfileStore(
+            dataDirectory,
+            sp.GetService<ILogger<SpeedProfileStore>>() ?? NullLogger<SpeedProfileStore>.Instance));
+        services.AddSingleton<IMergeService>(sp => new MergeService(
+            sp.GetRequiredService<IFfmpegRunner>(),
+            sp.GetRequiredService<ISpeedProfileStore>(),
+            GetFreeBytes,
+            tempRoot,
+            maxConcurrency,
+            sp.GetService<ILogger<MergeService>>() ?? NullLogger<MergeService>.Instance));
+
+        return services;
+    }
+
+    /// <summary>The real free-space query. It lives in the composition root so
+    /// <see cref="MergeService"/> stays testable without a real volume — the disk guard is the last
+    /// thing between the user and a half-written merge, and it must be exercised in unit tests.</summary>
+    /// <remarks>Returns 0 rather than throwing when the volume cannot be queried (a disconnected
+    /// network share, a path on a vanished drive): 0 free bytes fails the guard, which is the safe
+    /// direction — refuse the merge rather than start one we cannot finish.</remarks>
+    private static long GetFreeBytes(string path)
+    {
+        try
+        {
+            var root = Path.GetPathRoot(Path.GetFullPath(path));
+            return string.IsNullOrEmpty(root) ? 0 : new DriveInfo(root).AvailableFreeSpace;
+        }
+        catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException)
+        {
+            return 0;
+        }
+    }
+}

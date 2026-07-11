@@ -37,6 +37,13 @@ public class BundledBinaryProviderTests : IDisposable
     public void Constructor_Throws_WhenDirectoryNull()
         => Assert.Throws<ArgumentNullException>(() => new BundledBinaryProvider(null!));
 
+    [Fact]
+    public void GetPath_ResolvesFfprobe()
+    {
+        var provider = new BundledBinaryProvider(@"C:\bin");
+        Assert.Equal(Path.Combine(@"C:\bin", "ffprobe.exe"), provider.GetPath(ExternalBinary.Ffprobe));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);

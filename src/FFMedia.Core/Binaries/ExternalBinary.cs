@@ -4,5 +4,6 @@ namespace FFMedia.Core.Binaries;
 public enum ExternalBinary
 {
     YtDlp,
-    Ffmpeg
+    Ffmpeg,
+    Ffprobe
 }

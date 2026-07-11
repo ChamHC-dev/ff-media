@@ -22,4 +22,20 @@ public class ResultTests
         Assert.Equal("boom", r.Error);
         Assert.Null(r.Value);
     }
+
+    [Fact]
+    public void Success_HasNoError()
+    {
+        var result = Result.Success();
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.Error);
+    }
+
+    [Fact]
+    public void Failure_CarriesError()
+    {
+        var result = Result.Failure("boom");
+        Assert.False(result.IsSuccess);
+        Assert.Equal("boom", result.Error);
+    }
 }
