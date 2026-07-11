@@ -17,6 +17,12 @@ namespace FFMedia.Tests.VideoMerger;
 public class MergeServiceTests : IDisposable
 {
     private readonly string _tempRoot = Path.Combine(Path.GetTempPath(), "ffmedia-merge-" + Guid.NewGuid().ToString("N"));
+
+    /// <summary>Where the fixture clips live. Deliberately NOT under <see cref="_tempRoot"/> — the
+    /// cleanup tests assert that the merge's temp root is left empty, and source files sitting in it
+    /// would make that assertion lie.</summary>
+    private readonly string _sourceRoot = Path.Combine(Path.GetTempPath(), "ffmedia-src-" + Guid.NewGuid().ToString("N"));
+
     private static readonly MergeTarget Target = MergeTarget.Default;
 
     /// <summary>Heuristic output bitrate of <see cref="MergeTarget.Default"/> — the number the
@@ -27,18 +33,33 @@ public class MergeServiceTests : IDisposable
     public void Dispose()
     {
         GC.SuppressFinalize(this);
-        if (Directory.Exists(_tempRoot))
+        foreach (var directory in new[] { _tempRoot, _sourceRoot })
         {
-            Directory.Delete(_tempRoot, recursive: true);
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
         }
     }
 
-    private static MergeClip Conforming(string path, double seconds = 5) => new(path, new MediaInfo(
+    /// <summary>A real file on disk for <paramref name="name"/>. The clips must actually exist: the
+    /// concat preflight refuses to merge a segment it cannot open, because ffmpeg would otherwise
+    /// drop it (and everything after it) and still exit 0. Fixtures pointing at imaginary paths
+    /// would exercise a code path no user can reach.</summary>
+    private string Src(string name)
+    {
+        Directory.CreateDirectory(_sourceRoot);
+        var path = Path.Combine(_sourceRoot, name);
+        File.WriteAllText(path, "clip");
+        return path;
+    }
+
+    private MergeClip Conforming(string name, double seconds = 5) => new(Src(name), new MediaInfo(
         TimeSpan.FromSeconds(seconds), "mov,mp4,m4a",
         new VideoStreamInfo(1920, 1080, new FrameRate(30, 1), "h264", "yuv420p", 0),
         new AudioStreamInfo("aac", 48000, 2)));
 
-    private static MergeClip NonConforming(string path, double seconds = 5) => new(path, new MediaInfo(
+    private MergeClip NonConforming(string name, double seconds = 5) => new(Src(name), new MediaInfo(
         TimeSpan.FromSeconds(seconds), "matroska,webm",
         new VideoStreamInfo(1280, 720, new FrameRate(60, 1), "vp9", "yuv420p", 0),
         null));
@@ -168,6 +189,89 @@ public class MergeServiceTests : IDisposable
         throw new InvalidOperationException($"'{flag}' not found in [{string.Join(' ', args)}]");
     }
 
+    // ---------------------------------------------------------------- truncation guards
+
+    /// <summary>Probes whatever it is told to, so the truncation guard can be driven from a test.</summary>
+    private sealed class FakeAnalyzer : IMediaAnalyzer
+    {
+        private readonly TimeSpan? _duration;
+        public FakeAnalyzer(TimeSpan? duration) => _duration = duration;
+
+        public Task<Result<MediaInfo>> AnalyzeAsync(string filePath, CancellationToken ct = default)
+            => Task.FromResult(_duration is null
+                ? Result<MediaInfo>.Failure("unreadable")
+                : Result<MediaInfo>.Success(new MediaInfo(
+                    _duration.Value, "mov,mp4,m4a", Yuv1080p30, Aac)));
+    }
+
+    private MergeService BuildVerifying(IFfmpegRunner ffmpeg, TimeSpan? probedOutputDuration)
+        => new(ffmpeg, new FakeSpeedStore(), _ => long.MaxValue, _tempRoot, 2,
+            NullLogger<MergeService>.Instance, new FakeAnalyzer(probedOutputDuration));
+
+    [Fact]
+    public async Task MergeAsync_RefusesToMerge_WhenAClipHasVanishedSinceItWasAdded()
+    {
+        // ffmpeg's concat demuxer does NOT fail on a segment it cannot open: it drops that segment
+        // AND EVERY ONE AFTER IT and still exits 0 — so without this guard we would report a
+        // completed merge and hand the user a silently truncated video. Reachable with no trickery:
+        // on the fast path the list holds the user's own paths, so moving a clip is enough.
+        var ffmpeg = new FakeFfmpeg();
+        var request = Request(Conforming("here.mp4"), Conforming("gone.mp4"));
+        File.Delete(request.Clips[1].SourcePath);
+
+        var result = await Build(ffmpeg).MergeAsync(request);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(
+            "'gone.mp4' can no longer be read — it may have been moved, renamed, or deleted since "
+            + "it was added. Remove it from the list, or put it back.",
+            result.Error);
+        Assert.Empty(ffmpeg.Invocations); // and we never even launched the concat
+    }
+
+    [Fact]
+    public async Task MergeAsync_RejectsAnOutputShorterThanItsClips_AndDiscardsIt()
+    {
+        // The backstop the open-check cannot provide: a CORRUPT segment is perfectly openable, and
+        // ffmpeg drops it and still exits 0. The output's own duration is the only honest evidence.
+        var ffmpeg = new FakeFfmpeg();
+        var request = Request(Conforming("a.mp4", seconds: 5), Conforming("b.mp4", seconds: 5));
+
+        // 10s of clips in, 5s of video out: a clip was silently dropped.
+        var result = await BuildVerifying(ffmpeg, TimeSpan.FromSeconds(5)).MergeAsync(request);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(
+            "The merge finished but the result is 0:05 instead of 0:10 — at least one clip was "
+            + "dropped, most likely because it is corrupt or unreadable. The incomplete file has "
+            + "been discarded.",
+            result.Error);
+        Assert.False(File.Exists(request.OutputPath)); // the misleading half-video is gone
+    }
+
+    [Fact]
+    public async Task MergeAsync_AcceptsAnOutputWithinTheRoundingTolerance()
+    {
+        // Container timestamps round, so demanding an exact match would fail every real merge.
+        var request = Request(Conforming("a.mp4", seconds: 5), Conforming("b.mp4", seconds: 5));
+
+        var result = await BuildVerifying(new FakeFfmpeg(), TimeSpan.FromSeconds(9.7)).MergeAsync(request);
+
+        Assert.True(result.IsSuccess, result.Error);
+        File.Delete(request.OutputPath);
+    }
+
+    [Fact]
+    public async Task MergeAsync_FailsWhenTheMergedFileCannotBeReadBack()
+    {
+        var request = Request(Conforming("a.mp4"), Conforming("b.mp4"));
+
+        var result = await BuildVerifying(new FakeFfmpeg(), probedOutputDuration: null).MergeAsync(request);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("The merged file could not be read back: unreadable", result.Error);
+    }
+
     // ---------------------------------------------------------------- orphan sweep
 
     [Fact]
@@ -202,7 +306,7 @@ public class MergeServiceTests : IDisposable
         // matches segments by stream INDEX, lands the plain clip's audio on this clip's subtitle
         // slot, exits 0, and the merge "succeeds" with a mute second half. So it must be encoded.
         var withSubtitles = new MergeClip(
-            "subbed.mp4", Info(Yuv1080p30, Aac) with { ExtraStreamCount = 1 });
+            Src("subbed.mp4"), Info(Yuv1080p30, Aac) with { ExtraStreamCount = 1 });
         var ffmpeg = new FakeFfmpeg();
         var request = Request(withSubtitles, Conforming("plain.mp4"));
 
@@ -214,7 +318,7 @@ public class MergeServiceTests : IDisposable
         Assert.Equal(2, ffmpeg.Invocations.Count);
         var encode = ffmpeg.Invocations.First();
         Assert.Contains("-vf", encode);
-        Assert.Contains("subbed.mp4", encode);
+        Assert.Contains(withSubtitles.SourcePath, encode);
 
         // And the concat references the NORMALIZED intermediate for it, never the original.
         Assert.DoesNotContain("subbed.mp4", ffmpeg.ConcatListContent);
@@ -239,7 +343,7 @@ public class MergeServiceTests : IDisposable
         Assert.Equal(ConcatArgsBuilder.BuildArgs(listPath, request.OutputPath, MergeContainer.Mp4), only);
 
         // The conforming clips are concatenated from where they already sit.
-        Assert.Equal(ConcatArgsBuilder.BuildListFile(["a.mp4", "b.mp4"]), ffmpeg.ConcatListContent);
+        Assert.Equal(ConcatArgsBuilder.BuildListFile([Src("a.mp4"), Src("b.mp4")]), ffmpeg.ConcatListContent);
         File.Delete(request.OutputPath);
     }
 
@@ -310,7 +414,7 @@ public class MergeServiceTests : IDisposable
         Assert.Equal(new[] { "0000.mp4", "0002.mp4" }, temps.Select(p => Path.GetFileName(p)!).ToArray());
 
         // Source order is preserved: temp(0), original b.mp4, temp(2).
-        Assert.Equal(ConcatArgsBuilder.BuildListFile([temps[0], "b.mp4", temps[1]]), ffmpeg.ConcatListContent);
+        Assert.Equal(ConcatArgsBuilder.BuildListFile([temps[0], Src("b.mp4"), temps[1]]), ffmpeg.ConcatListContent);
         File.Delete(request.OutputPath);
     }
 

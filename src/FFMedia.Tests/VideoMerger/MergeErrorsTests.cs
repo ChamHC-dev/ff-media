@@ -184,4 +184,36 @@ public class MergeErrorsTests
         // null is not hypothetical: Result.Error is string?, so the ViewModel hands us exactly that.
         Assert.Equal("The merge failed, but ffmpeg reported no reason.", MergeErrors.Describe(raw));
     }
+
+    [Theory]
+    // Real ffmpeg: the concat demuxer reports an errno with NEITHER an input nor an output marker.
+    [InlineData("ffmpeg failed (exit 1):\n[concat @ 0x1] Error during demuxing: Permission denied")]
+    [InlineData("ffmpeg failed (exit 1):\n[concat @ 0x1] Error during demuxing: No such file or directory")]
+    public void Describe_PassesAnUnqualifiedErrnoThrough_RatherThanGuessingWhichFileItMeant(string raw)
+    {
+        // This is the class's headline invariant, and it was the one thing nothing pinned. Without
+        // a marker we genuinely do not know whether the unreadable file was a clip or the output —
+        // and a confidently WRONG instruction ("check the folder's permissions") sends the user to
+        // fix a folder that is fine while the real culprit, a clip, goes unmentioned. Say nothing
+        // rather than say something false: the raw text at least names the operation that failed.
+        Assert.Equal(raw, MergeErrors.Describe(raw));
+    }
+
+    [Fact]
+    public void Describe_DistinguishesAnUnreadableClipFromAnUnwritableOutput()
+    {
+        // The same errno, the same words — only ffmpeg's own marker says which file it meant.
+        const string input = "ffmpeg failed (exit 1):\nError opening input files: Permission denied";
+        const string output = "ffmpeg failed (exit 1):\nError opening output file out.mp4.\n"
+            + "Error opening output files: Permission denied";
+
+        Assert.Equal(
+            "FFMedia could not read one of the clips. Check the file's permissions, "
+            + "or remove it from the list.",
+            MergeErrors.Describe(input));
+        Assert.Equal(
+            "FFMedia could not write the output file. Check the folder's permissions, "
+            + "or pick another folder.",
+            MergeErrors.Describe(output));
+    }
 }

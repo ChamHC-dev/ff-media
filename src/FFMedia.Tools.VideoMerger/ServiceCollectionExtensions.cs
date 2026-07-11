@@ -40,7 +40,10 @@ public static class ServiceCollectionExtensions
             GetFreeBytes,
             tempRoot,
             maxConcurrency,
-            sp.GetService<ILogger<MergeService>>() ?? NullLogger<MergeService>.Instance));
+            sp.GetService<ILogger<MergeService>>() ?? NullLogger<MergeService>.Instance,
+            // Proves the finished file is whole: ffmpeg's concat exits 0 even when it silently
+            // drops a segment, so the output's own duration is the only trustworthy evidence.
+            sp.GetRequiredService<IMediaAnalyzer>()));
 
         return services;
     }

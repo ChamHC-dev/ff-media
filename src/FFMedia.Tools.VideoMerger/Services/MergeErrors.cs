@@ -29,8 +29,11 @@ public static class MergeErrors
             return "The merge failed, but ffmpeg reported no reason.";
         }
 
-        // Checked before the errno cases: the unknown-encoder tail also carries an
-        // "Error opening output file …" line, which would otherwise misfile it as a path problem.
+        // Kept ahead of the errno cases as defence in depth: the unknown-encoder tail also carries
+        // an "Error opening output file …" line. Today the errno branches are additionally gated on
+        // "permission denied" / "no such file", which that tail does not contain — so this order is
+        // not currently load-bearing. It becomes load-bearing the moment anyone matches on the
+        // marker alone, which is exactly the kind of edit that looks harmless.
         if (Contains(ffmpegError, "unknown encoder"))
         {
             return "This ffmpeg build cannot encode the chosen video codec. "
