@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using FFMedia.Core.History;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -82,5 +83,104 @@ public class HistoryServiceTests
         System.Threading.Tasks.Parallel.For(0, 100, i => svc.Append(Entry("E" + i)));
 
         Assert.Equal(100, svc.Query().Count);
+    }
+
+    // --- HistorySource back-compat -------------------------------------------------------------
+    // history.json already exists on real disks, written before merges were a thing: it has no
+    // "Source" property at all. If that file failed to deserialize, JsonStore would quarantine it
+    // to .bak and hand back an empty document — i.e. the user's history would silently vanish.
+
+    /// <summary>A real, verbatim pre-merge history.json (the exact shape HistoryService wrote).</summary>
+    private const string LegacyHistoryJson = """
+    {
+      "Version": 1,
+      "Entries": [
+        {
+          "Title": "Some Video",
+          "Url": "https://example.com/x",
+          "OutputPath": "C:\\out\\x.mp4",
+          "Format": "Mp4 P1080",
+          "Timestamp": "2026-07-01T10:00:00+00:00",
+          "Status": "Completed"
+        }
+      ]
+    }
+    """;
+
+    [Fact]
+    public void LegacyHistoryFile_WithNoSourceProperty_LoadsAsDownload_AndIsNotQuarantined()
+    {
+        var dir = TempDir();
+        var path = Path.Combine(dir, "history.json");
+        File.WriteAllText(path, LegacyHistoryJson);
+
+        var svc = new HistoryService(dir, NullLogger<HistoryService>.Instance);
+
+        var entry = Assert.Single(svc.Query());
+        Assert.Equal(
+            new HistoryEntry(
+                "Some Video",
+                "https://example.com/x",
+                @"C:\out\x.mp4",
+                "Mp4 P1080",
+                new DateTimeOffset(2026, 7, 1, 10, 0, 0, TimeSpan.Zero),
+                "Completed",
+                HistorySource.Download),
+            entry);
+        Assert.Equal(HistorySource.Download, entry.Source);
+        // The whole failure mode we are guarding: a deserialization throw would have moved the
+        // user's history aside and returned an empty document instead.
+        Assert.False(File.Exists(path + ".bak"));
+    }
+
+    [Fact]
+    public void HistoryEntry_OmittedSource_DeserializesToDownload_NotAnUninitializedValue()
+    {
+        // Pins the System.Text.Json behaviour the default relies on: an optional positional
+        // record parameter's declared default is used when the JSON property is absent.
+        const string json = """
+        { "Title": "T", "Url": "U", "OutputPath": null, "Format": "F",
+          "Timestamp": "2026-07-01T10:00:00+00:00", "Status": "Completed" }
+        """;
+
+        var entry = JsonSerializer.Deserialize<HistoryEntry>(json)!;
+
+        Assert.Equal(HistorySource.Download, entry.Source);
+        Assert.Equal(0, (int)entry.Source); // Download is the zero value, so this holds either way…
+    }
+
+    [Fact]
+    public void HistoryEntry_OmittedSource_HonoursANonZeroDeclaredDefault()
+    {
+        // …so prove the default is genuinely honoured (not merely default(T)) with a probe type
+        // whose declared default is the NON-zero enum member. If STJ ignored declared defaults,
+        // this would come back as Download.
+        const string json = """{ "Title": "T" }""";
+
+        var probe = JsonSerializer.Deserialize<SourceDefaultProbe>(json)!;
+
+        Assert.Equal(HistorySource.Merge, probe.Source);
+    }
+
+    private sealed record SourceDefaultProbe(string Title, HistorySource Source = HistorySource.Merge);
+
+    [Fact]
+    public void MergeEntry_PersistsSourceByName_AndSurvivesAReload()
+    {
+        var dir = TempDir();
+        var merge = new HistoryEntry(
+            "holiday.mp4", "", @"C:\out\holiday.mp4", "MP4 · 1920x1080 · 30 fps",
+            DateTimeOffset.UnixEpoch, "Completed", HistorySource.Merge);
+
+        new HistoryService(dir, NullLogger<HistoryService>.Instance).Append(merge);
+
+        // On disk the enum must be a readable name, not a brittle integer.
+        using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(dir, "history.json")));
+        var written = doc.RootElement.GetProperty("Entries")[0];
+        Assert.Equal("Merge", written.GetProperty("Source").GetString());
+        Assert.Equal("", written.GetProperty("Url").GetString());
+
+        var reloaded = Assert.Single(new HistoryService(dir, NullLogger<HistoryService>.Instance).Query());
+        Assert.Equal(merge, reloaded);
     }
 }
