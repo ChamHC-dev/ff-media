@@ -3,15 +3,22 @@ using FFMedia.Core.Results;
 
 namespace FFMedia.Tools.VideoMerger.Services;
 
-/// <summary>Pure preflight check: is there room for the normalize phase's temp intermediates?
-/// Kept free of <see cref="System.IO.DriveInfo"/> so it is testable without a real volume.</summary>
+/// <summary>Pure preflight check: is there room for what the merge will write — the normalize
+/// phase's temp intermediates <em>and</em> the merged output? Kept free of
+/// <see cref="System.IO.DriveInfo"/> so it is testable without a real volume.</summary>
 /// <remarks>This is the last thing between the user and a half-written merge on a full disk, so it
 /// fails fast and its message says exactly how much is needed, how much is free, and how much to
-/// free up — in units a human reads.</remarks>
+/// free up — in units a human reads. <paramref name="requiredBytes"/> is the caller's problem to
+/// size correctly; note that <c>MergeEstimate.TempBytesEstimate</c> alone is <c>0</c> on the fast
+/// path.</remarks>
 public static class DiskSpaceGuard
 {
     /// <summary>Headroom over the raw estimate — the bitrate heuristic can undershoot.</summary>
-    public const double SafetyMargin = 1.2;
+    public const double SafetyMargin = 1.0 + (MarginPercent / 100.0);
+
+    /// <summary>The single source of the margin: <see cref="SafetyMargin"/>, the failure message and
+    /// <see cref="WithMargin"/> all derive from it, so they cannot disagree.</summary>
+    private const int MarginPercent = 20;
 
     public static Result Evaluate(long freeBytes, long requiredBytes)
     {
@@ -27,18 +34,18 @@ public static class DiskSpaceGuard
         }
 
         return Result.Failure(
-            $"Not enough disk space for the merge's temporary files: {Format(needed)} needed "
-            + $"(estimate {Format(required)} + 20% margin), only {Format(free)} free. "
+            $"Not enough disk space for the merge: {Format(needed)} needed "
+            + $"(estimate {Format(required)} + {MarginPercent}% margin), only {Format(free)} free. "
             + $"Free up {Format(needed - free)} and try again.");
     }
 
-    /// <summary>Applies <see cref="SafetyMargin"/> in exact integer arithmetic (+1/5, rounded up),
-    /// so the pass/fail boundary does not float on 1.2 being inexact in binary — a
-    /// <c>(long)(bytes * 1.2)</c> under-applies the margin for most values. Saturates rather than
-    /// overflowing on a huge estimate.</summary>
+    /// <summary>Applies the margin in exact integer arithmetic (rounded up), so the pass/fail
+    /// boundary does not float on 1.2 being inexact in binary — a <c>(long)(bytes * 1.2)</c>
+    /// under-applies the margin for most values. Saturates rather than overflowing on a huge
+    /// estimate.</summary>
     private static long WithMargin(long bytes)
     {
-        var extra = (bytes / 5) + (bytes % 5 == 0 ? 0 : 1);
+        var extra = ((bytes / 100) * MarginPercent) + ((((bytes % 100) * MarginPercent) + 99) / 100);
         return bytes > long.MaxValue - extra ? long.MaxValue : bytes + extra;
     }
 

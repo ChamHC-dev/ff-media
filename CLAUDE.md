@@ -64,7 +64,7 @@ _Newest first. One entry per completed task/session._
   which then launches a **full ffmpeg encode** for a merge the user already cancelled. It showed up
   as a 1-in-5 flake; a 200-iteration harness proved 197/200 runs launched the extra encode. Fixed by
   re-checking the token *after* acquiring the gate.
-- **Verified:** Release build **0/0**; **420/420** unit tests pass (`Category!=Integration`). Each
+- **Verified:** Release build **0/0**; **425/425** unit tests pass (`Category!=Integration`). Each
   task was reviewed by an independent agent that mutation-tested the tests — which caught three
   suites that passed against a deliberately broken implementation (a reversed stderr tail, a biased
   Fisher–Yates, a per-progress-line speed sample). Argv was additionally validated end-to-end against

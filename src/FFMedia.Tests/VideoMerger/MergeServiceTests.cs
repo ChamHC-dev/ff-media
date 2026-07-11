@@ -168,6 +168,30 @@ public class MergeServiceTests : IDisposable
         throw new InvalidOperationException($"'{flag}' not found in [{string.Join(' ', args)}]");
     }
 
+    // ---------------------------------------------------------------- orphan sweep
+
+    [Fact]
+    public async Task MergeAsync_SweepsOrphanedTempDirectories_ButSparesARecentOne()
+    {
+        // Debris from a merge that was killed before its finally could run. The sweep is wired into
+        // the preflight, so an unused TempDirectorySweeper would be dead code — this is what proves
+        // it actually runs. The recent directory stands in for a merge running right now.
+        var orphan = Path.Combine(_tempRoot, "merge-crashed");
+        var live = Path.Combine(_tempRoot, "merge-in-flight");
+        Directory.CreateDirectory(orphan);
+        Directory.CreateDirectory(live);
+        File.WriteAllText(Path.Combine(orphan, "0001.mp4"), "abandoned intermediate");
+        Directory.SetLastWriteTimeUtc(orphan, DateTime.UtcNow.AddDays(-3));
+
+        var request = Request(Conforming("a.mp4"));
+        var result = await Build(new FakeFfmpeg()).MergeAsync(request);
+
+        Assert.True(result.IsSuccess, result.Error);
+        Assert.False(Directory.Exists(orphan));
+        Assert.True(Directory.Exists(live));
+        File.Delete(request.OutputPath);
+    }
+
     // ---------------------------------------------------------------- fast path
 
     [Fact]

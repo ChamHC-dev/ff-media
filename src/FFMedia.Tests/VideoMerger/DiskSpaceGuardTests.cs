@@ -11,6 +11,21 @@ public class DiskSpaceGuardTests
         Assert.Equal(1.2, DiskSpaceGuard.SafetyMargin);
     }
 
+    [Theory]
+    [InlineData(1_000_000_000L)]
+    [InlineData(7L)]              // exercises the rounding-up, where an exact 1/5 does not divide
+    [InlineData(5L)]
+    [InlineData(1L)]
+    public void Evaluate_ReservesExactlyTheAdvertisedSafetyMargin(long required)
+    {
+        // Ties the public SafetyMargin const to what the guard actually reserves. Without this the
+        // const is decoration: the arithmetic could drift to 10% and only this number would lie.
+        var needed = (long)Math.Ceiling(required * DiskSpaceGuard.SafetyMargin);
+
+        Assert.True(DiskSpaceGuard.Evaluate(freeBytes: needed, requiredBytes: required).IsSuccess);
+        Assert.False(DiskSpaceGuard.Evaluate(freeBytes: needed - 1, requiredBytes: required).IsSuccess);
+    }
+
     [Fact]
     public void Evaluate_PassesWithAmpleSpace()
     {
@@ -43,7 +58,7 @@ public class DiskSpaceGuardTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal(
-            "Not enough disk space for the merge's temporary files: 5.59 GB needed "
+            "Not enough disk space for the merge: 5.59 GB needed "
             + "(estimate 4.66 GB + 20% margin), only 0 B free. Free up 5.59 GB and try again.",
             result.Error);
     }
@@ -56,7 +71,7 @@ public class DiskSpaceGuardTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal(
-            "Not enough disk space for the merge's temporary files: 114.44 MB needed "
+            "Not enough disk space for the merge: 114.44 MB needed "
             + "(estimate 95.37 MB + 20% margin), only 14.44 MB free. Free up 100 MB and try again.",
             result.Error);
     }

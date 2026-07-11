@@ -22,6 +22,11 @@ public sealed class MergeService : IMergeService
     /// <summary>Below this, a wall-clock throughput reading is noise (or a division by ~zero).</summary>
     private const double MinTimedSeconds = 0.25;
 
+    /// <summary>How stale an abandoned <c>merge-*</c> temp directory must be before the sweep will
+    /// reclaim it. Generous on purpose: age is the only evidence that a directory is orphaned rather
+    /// than belonging to a merge running right now, possibly in another instance of the app.</summary>
+    private static readonly TimeSpan OrphanMaxAge = TimeSpan.FromHours(24);
+
     private readonly IFfmpegRunner _ffmpeg;
     private readonly ISpeedProfileStore _speedStore;
     private readonly Func<string, long> _getFreeBytes;
@@ -184,6 +189,15 @@ public sealed class MergeService : IMergeService
     /// this merge is about to produce.</summary>
     private Result Preflight(MergeRequest request)
     {
+        // Reclaim debris from a merge that crashed or was killed before its finally could run. Done
+        // here, before we measure free space, precisely so a previous run's orphans do not count
+        // against this one's disk check. Best-effort: a directory it cannot remove is skipped.
+        var swept = TempDirectorySweeper.SweepOrphans(_tempRoot, OrphanMaxAge, DateTime.UtcNow);
+        if (swept > 0)
+        {
+            _logger.LogInformation("Swept {Count} orphaned merge temp director(ies).", swept);
+        }
+
         var estimate = MergeEstimator.Estimate(request.Clips, request.Target, _speedStore.Load());
 
         // TempBytesEstimate counts ONLY the re-encoded intermediates and excludes the merged output —
