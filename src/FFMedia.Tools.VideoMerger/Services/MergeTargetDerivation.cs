@@ -56,8 +56,8 @@ public static class MergeTargetDerivation
 
         return MergeTarget.Default with
         {
-            Width = largest.Width,
-            Height = largest.Height,
+            Width = ToEven(largest.Width),
+            Height = ToEven(largest.Height),
             FrameRate = Snap(fastest),
             VideoCodec = codec,
             Container = container,
@@ -66,6 +66,14 @@ public static class MergeTargetDerivation
             AudioChannels = channels,
         };
     }
+
+    /// <summary>Rounds a frame dimension DOWN to an even number (floor of 2). The normalize phase
+    /// encodes to yuv420p, whose 2x2 chroma subsampling requires both dimensions to be even —
+    /// libx264 rejects an odd width or height outright ("width not divisible by 2"). Real-world
+    /// clips are even, so an odd dimension only reaches us from an exotic or malformed file; taking
+    /// the raw dimension would derive a target that could not be encoded at all. Rounding down (not
+    /// up) keeps the target within the source frame, so the pad/crop filters never invent pixels.</summary>
+    private static int ToEven(int dimension) => Math.Max(2, dimension - (Math.Abs(dimension) % 2));
 
     /// <summary>Snaps to the closest standard rate within <see cref="SnapTolerance"/>, or keeps the
     /// exact measured rate if none is close enough. Deliberately picks the closest candidate rather

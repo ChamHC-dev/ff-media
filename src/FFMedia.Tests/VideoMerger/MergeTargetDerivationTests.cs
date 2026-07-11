@@ -29,6 +29,26 @@ public class MergeTargetDerivationTests
     }
 
     [Fact]
+    public void Derive_RoundsOddDimensionsDownToEven()
+    {
+        // yuv420p (and therefore libx264) rejects an odd width or height, so the derived target
+        // must never carry one straight through from an exotic source clip.
+        var target = MergeTargetDerivation.Derive([Clip(1921, 1081, 30)]);
+
+        Assert.Equal(1920, target.Width);
+        Assert.Equal(1080, target.Height);
+    }
+
+    [Fact]
+    public void Derive_KeepsAtLeastTwoPixels_WhenTheLargestClipIsAbsurdlySmall()
+    {
+        var target = MergeTargetDerivation.Derive([Clip(1, 1, 30)]);
+
+        Assert.Equal(2, target.Width);
+        Assert.Equal(2, target.Height);
+    }
+
+    [Fact]
     public void Derive_TakesHighestFrameRate()
     {
         var target = MergeTargetDerivation.Derive([Clip(1920, 1080, 24), Clip(1280, 720, 60)]);
