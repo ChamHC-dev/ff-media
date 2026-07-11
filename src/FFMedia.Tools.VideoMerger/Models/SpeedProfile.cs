@@ -15,7 +15,10 @@ public sealed class SpeedSample
 /// NaN into the user-facing estimate.</remarks>
 public sealed class SpeedProfile
 {
-    /// <summary>How many samples the rolling average remembers.</summary>
+    /// <summary>Floor on the newest reading's weight: it lands at 1/(n+1) while the first ten
+    /// samples accumulate, then 1/10 forever. Strictly this makes the average an exponential
+    /// decay rather than a true window — an eleventh-from-last run still carries ~4% — but it
+    /// keeps the state O(1) and lets the last ten runs dominate, which is what the estimate needs.</summary>
     private const int Window = 10;
 
     private const double MaxBand = 0.35;
@@ -52,12 +55,9 @@ public sealed class SpeedProfile
     public double GetFactor(MergeTarget target)
     {
         ArgumentNullException.ThrowIfNull(target);
-        if (Samples.TryGetValue(KeyFor(target), out var sample)
-            && sample is not null
-            && sample.Count > 0
-            && IsUsable(sample.Average))
+        if (MeasuredCount(target) > 0)
         {
-            return sample.Average;
+            return Samples[KeyFor(target)].Average;
         }
 
         var seed = SeedFactors[Bucket(target.PixelCount)];
@@ -104,11 +104,20 @@ public sealed class SpeedProfile
     public double BandFor(MergeTarget target)
     {
         ArgumentNullException.ThrowIfNull(target);
-        var count = Samples.TryGetValue(KeyFor(target), out var sample) && sample is not null
-            ? Math.Clamp(sample.Count, 0, Window)
-            : 0;
-        return Math.Clamp(MaxBand - (BandNarrowingPerSample * count), MinBand, MaxBand);
+        return Math.Clamp(MaxBand - (BandNarrowingPerSample * MeasuredCount(target)), MinBand, MaxBand);
     }
+
+    /// <summary>How many real measurements back this target — 0 unless the persisted bucket is
+    /// usable as a whole. GetFactor and BandFor must agree on this: if the stored average is
+    /// nonsense we fall back to the seed, and a band narrowed around a value we never measured
+    /// would claim ±19% confidence in a pure guess.</summary>
+    private int MeasuredCount(MergeTarget target)
+        => Samples.TryGetValue(KeyFor(target), out var sample)
+            && sample is not null
+            && sample.Count > 0
+            && IsUsable(sample.Average)
+                ? Math.Clamp(sample.Count, 0, Window)
+                : 0;
 
     private static bool IsUsable(double speed) => double.IsFinite(speed) && speed > 0;
 

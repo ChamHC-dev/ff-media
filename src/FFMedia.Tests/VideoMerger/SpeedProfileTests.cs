@@ -219,6 +219,38 @@ public class SpeedProfileTests
     }
 
     [Fact]
+    public void BandFor_WidensToMax_WhenTheAverageIsUnusable_MatchingGetFactorsFallback()
+    {
+        // GetFactor and BandFor must agree on what counts as measured. With Count = 4 but an
+        // unusable average, GetFactor falls back to the seed — so the band has to widen back to
+        // ±35%, or the UI would claim ±19% confidence in a number nobody ever measured.
+        var profile = new SpeedProfile
+        {
+            Samples = { ["H264/HD1080"] = new SpeedSample { Average = 0, Count = 4 } },
+        };
+
+        Assert.Equal(3.5, profile.GetFactor(Hd));
+        Assert.Equal(0.35, profile.BandFor(Hd), 10);
+    }
+
+    [Fact]
+    public void Record_ClampsANegativePersistedCount_EvenWhenTheAverageIsUsable()
+    {
+        // The average is fine here, so the repair path above never fires and the count clamp is
+        // the only thing standing between us and weight = 0. Unclamped, `min(-1 + 1, 10)` divides
+        // by zero and persists Average = +infinity, which no later sample can undo.
+        var profile = new SpeedProfile
+        {
+            Samples = { ["H264/HD1080"] = new SpeedSample { Average = 3, Count = -1 } },
+        };
+
+        profile.Record(Hd, 6.0);
+
+        Assert.Equal(6.0, profile.GetFactor(Hd));
+        Assert.True(double.IsFinite(profile.Samples["H264/HD1080"].Average));
+    }
+
+    [Fact]
     public void BandFor_IsClampedToTheBand_WhenPersistedCountIsNonsense()
     {
         var profile = new SpeedProfile
