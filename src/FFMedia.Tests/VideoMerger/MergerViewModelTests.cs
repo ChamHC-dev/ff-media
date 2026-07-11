@@ -650,6 +650,32 @@ public class MergerViewModelTests
     }
 
     [Fact]
+    public async Task Rederiving_NeverFlickersIsTargetOverriddenTrue()
+    {
+        // A re-derivation writes the same property the user's edit does, so without the suppression
+        // guard the flag flips false -> true -> false on every single add. The end state is right,
+        // but the view sees the notification: the "target overridden — reset?" affordance would
+        // blink into existence and out again each time a clip is dropped in.
+        var h = await BuildWithClipsAsync(1);
+        h.Analyzer.Returns(@"C:\big.mp4", Info(3840, 2160));
+
+        var overriddenNotifications = 0;
+        h.Vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(MergerViewModel.IsTargetOverridden))
+            {
+                overriddenNotifications++;
+            }
+        };
+
+        await h.Vm.AddClipsAsync([@"C:\big.mp4"]); // re-derives 1080p -> 4K
+
+        Assert.Equal(3840, h.Vm.Target.Width); // the derivation really did move the target
+        Assert.False(h.Vm.IsTargetOverridden);
+        Assert.Equal(0, overriddenNotifications);
+    }
+
+    [Fact]
     public async Task EditingTheTarget_RefreshesEveryClipBadge()
     {
         // The clip conforms to the derived 1080p target, and stops conforming when the user
