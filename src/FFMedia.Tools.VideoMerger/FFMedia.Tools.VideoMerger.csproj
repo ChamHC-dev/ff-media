@@ -8,9 +8,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Already in the solution at this version (the YouTube Downloader module uses it) — not a new
-         dependency, just this module finally needing the MVVM primitives for its ViewModels. -->
+    <!-- Both already in the solution at these exact versions (the YouTube Downloader module uses
+         them) — not new dependencies, just this module finally needing the MVVM primitives for its
+         ViewModels and the Fluent controls for its page. -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
   </ItemGroup>
 
   <ItemGroup>

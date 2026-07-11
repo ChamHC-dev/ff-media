@@ -117,6 +117,160 @@ public partial class MergerViewModel : ObservableObject
         }
     }
 
+    // ---- the target, projected one field at a time (spec §7.3: "every field overridable") --------
+
+    /// <remarks><para>The page edits the target through these projections rather than binding into
+    /// <see cref="Target"/> itself, for two reasons. <see cref="MergeTarget"/> is a record, so its
+    /// properties are <c>init</c>-only — a two-way binding to <c>Target.Width</c> has no setter to
+    /// call. And a record edit that lands on the value already there (<c>Target with { Width = 1920 }</c>
+    /// when the width IS 1920) no-ops the generated setter, so the <c>[ObservableProperty]</c> hook
+    /// never runs and an override that leaned on it would silently fail to latch.</para>
+    /// <para>Each setter therefore commits through <see cref="OverrideTarget"/>, which latches
+    /// <see cref="IsTargetOverridden"/> EXPLICITLY. Writing back the value that is already there is
+    /// still a no-op — a ComboBox echoing its own selection on load must not be mistaken for a user
+    /// edit (the same rule <see cref="SelectedFitMode"/> follows).</para></remarks>
+    public int TargetWidth
+    {
+        get => Target.Width;
+        set
+        {
+            // A non-positive dimension cannot be encoded (libx264 rejects it outright). Ignore it
+            // rather than committing a target the merge would only fail on, minutes later.
+            if (value > 0 && value != Target.Width)
+            {
+                OverrideTarget(Target with { Width = value });
+            }
+        }
+    }
+
+    public int TargetHeight
+    {
+        get => Target.Height;
+        set
+        {
+            if (value > 0 && value != Target.Height)
+            {
+                OverrideTarget(Target with { Height = value });
+            }
+        }
+    }
+
+    /// <summary>x264/x265 constant rate factor: 0 (lossless) – 51 (worst). Out-of-range values are
+    /// ignored; ffmpeg would reject them.</summary>
+    public int TargetCrf
+    {
+        get => Target.Crf;
+        set
+        {
+            if (value is >= 0 and <= 51 && value != Target.Crf)
+            {
+                OverrideTarget(Target with { Crf = value });
+            }
+        }
+    }
+
+    public MergeVideoCodec SelectedVideoCodec
+    {
+        get => Target.VideoCodec;
+        set
+        {
+            if (value != Target.VideoCodec)
+            {
+                OverrideTarget(Target with { VideoCodec = value });
+            }
+        }
+    }
+
+    public MergeAudioCodec SelectedAudioCodec
+    {
+        get => Target.AudioCodec;
+        set
+        {
+            if (value != Target.AudioCodec)
+            {
+                OverrideTarget(Target with { AudioCodec = value });
+            }
+        }
+    }
+
+    public int TargetAudioSampleRate
+    {
+        get => Target.AudioSampleRate;
+        set
+        {
+            if (value > 0 && value != Target.AudioSampleRate)
+            {
+                OverrideTarget(Target with { AudioSampleRate = value });
+            }
+        }
+    }
+
+    public int TargetAudioChannels
+    {
+        get => Target.AudioChannels;
+        set
+        {
+            if (value > 0 && value != Target.AudioChannels)
+            {
+                OverrideTarget(Target with { AudioChannels = value });
+            }
+        }
+    }
+
+    /// <summary>The container the merged file is written in — and, because ffmpeg picks its muxer
+    /// from the output file's EXTENSION (<see cref="ConcatArgsBuilder"/> emits no <c>-f</c>), the
+    /// thing that decides what <see cref="OutputFileName"/> must end in. The two are kept in lockstep
+    /// by <see cref="SyncFileNameToContainer"/> and <see cref="OnOutputFileNameChanged"/>: choose MKV
+    /// and you get an MKV, not an MP4 wearing an .mkv name — or, as it was before, the reverse.</summary>
+    public MergeContainer SelectedContainer
+    {
+        get => Target.Container;
+        set
+        {
+            if (value != Target.Container)
+            {
+                OverrideTarget(Target with { Container = value });
+            }
+        }
+    }
+
+    public IReadOnlyList<MergeContainer> Containers { get; } = Enum.GetValues<MergeContainer>();
+
+    public IReadOnlyList<MergeVideoCodec> VideoCodecs { get; } = Enum.GetValues<MergeVideoCodec>();
+
+    public IReadOnlyList<MergeAudioCodec> AudioCodecs { get; } = Enum.GetValues<MergeAudioCodec>();
+
+    /// <summary>The rates the Output panel offers. Not a fixed list: a derived rate that is not one
+    /// of the standards (a 12 fps timelapse, say) is added to it, or the ComboBox would show a blank
+    /// selection and the user could not see the rate their own clips implied.</summary>
+    public ObservableCollection<FrameRateOption> FrameRates { get; } =
+    [
+        new(new FrameRate(24000, 1001)), new(new FrameRate(24, 1)), new(new FrameRate(25, 1)),
+        new(new FrameRate(30000, 1001)), new(new FrameRate(30, 1)), new(new FrameRate(50, 1)),
+        new(new FrameRate(60000, 1001)), new(new FrameRate(60, 1)),
+    ];
+
+    public FrameRateOption? SelectedFrameRate
+    {
+        get => FrameRates.FirstOrDefault(option => option.Rate == Target.FrameRate);
+        set
+        {
+            // A ComboBox pushes null while its ItemsSource is being rebuilt. Ignore it: null is not
+            // a frame rate the user asked for.
+            if (value is not null && value.Rate != Target.FrameRate)
+            {
+                OverrideTarget(Target with { FrameRate = value.Rate });
+            }
+        }
+    }
+
+    /// <summary>One entry in the frame-rate dropdown. A rational (30000/1001) shown as a decimal
+    /// (29.97 fps), invariant — a frame rate is a stream parameter, not localized prose.</summary>
+    public sealed record FrameRateOption(FrameRate Rate)
+    {
+        public string Label => string.Create(CultureInfo.InvariantCulture, $"{Rate.Value:0.###} fps");
+    }
+
     public string OutputPath => Path.Combine(OutputFolder, OutputFileName);
 
     /// <summary>Merging a single clip is a copy, not a merge — and a second merge while one is
@@ -190,6 +344,24 @@ public partial class MergerViewModel : ObservableObject
             Clips.Move(index, index + 1);
             ResyncLocks();
         }
+    }
+
+    /// <summary>Drops <paramref name="clip"/> at <paramref name="index"/> — what the page's
+    /// drag-to-reorder ends in. An index outside the list, or a clip that is not in it, is ignored
+    /// rather than throwing: a drag that lands on empty space below the last row is a normal thing
+    /// for a user to do, not an error.</summary>
+    public void MoveTo(MergeClipViewModel clip, int index)
+    {
+        ArgumentNullException.ThrowIfNull(clip);
+
+        var current = Clips.IndexOf(clip);
+        if (current < 0 || index < 0 || index >= Clips.Count || index == current)
+        {
+            return;
+        }
+
+        Clips.Move(current, index);
+        ResyncLocks();
     }
 
     /// <summary>Randomizes the order, leaving every locked row in the slot it occupies.</summary>
@@ -434,9 +606,15 @@ public partial class MergerViewModel : ObservableObject
         }
 
         IsTargetOverridden = true;
-        OnPropertyChanged(nameof(SelectedFitMode));
+        SyncFileNameToContainer(value.Container);
+        NotifyTargetProjections();
         RefreshBadgesAndSummary();
     }
+
+    /// <summary>Commits a target edit made on the page. Everything the Output panel writes goes
+    /// through here so the override latches EXPLICITLY rather than relying on the record's setter
+    /// having actually changed a value.</summary>
+    private void OverrideTarget(MergeTarget target) => SetTarget(target, overridden: true);
 
     /// <summary>The clip list changed. Re-derive the target (unless the user has claimed it), then
     /// re-run every badge and the summary against whichever target is now in force.</summary>
@@ -487,8 +665,114 @@ public partial class MergerViewModel : ObservableObject
         }
 
         IsTargetOverridden = overridden;
-        OnPropertyChanged(nameof(SelectedFitMode));
+        SyncFileNameToContainer(Target.Container);
+        NotifyTargetProjections();
         RefreshBadgesAndSummary();
+    }
+
+    /// <summary>Every field of the target is projected as its own bindable property, and none of them
+    /// is an <c>[ObservableProperty]</c> — the target moved, so they all have to be re-read.</summary>
+    private void NotifyTargetProjections()
+    {
+        EnsureFrameRateOffered(Target.FrameRate);
+
+        OnPropertyChanged(nameof(SelectedFitMode));
+        OnPropertyChanged(nameof(TargetWidth));
+        OnPropertyChanged(nameof(TargetHeight));
+        OnPropertyChanged(nameof(TargetCrf));
+        OnPropertyChanged(nameof(SelectedVideoCodec));
+        OnPropertyChanged(nameof(SelectedAudioCodec));
+        OnPropertyChanged(nameof(TargetAudioSampleRate));
+        OnPropertyChanged(nameof(TargetAudioChannels));
+        OnPropertyChanged(nameof(SelectedContainer));
+        OnPropertyChanged(nameof(SelectedFrameRate));
+    }
+
+    /// <summary>A derived rate that is not one of the standards still has to appear in the dropdown,
+    /// or the ComboBox shows an empty selection for a target that is perfectly valid.</summary>
+    private void EnsureFrameRateOffered(FrameRate rate)
+    {
+        if (!FrameRates.Any(option => option.Rate == rate))
+        {
+            FrameRates.Add(new FrameRateOption(rate));
+        }
+    }
+
+    // ---- container ⇄ file extension ----------------------------------------
+    //
+    // ConcatArgsBuilder emits no `-f`, so ffmpeg picks the MUXER FROM THE OUTPUT FILE'S EXTENSION;
+    // Target.Container only gates `-movflags +faststart`. Left unreconciled, a derived MKV target
+    // wrote a real MP4 named "merged.mp4": the user picks MKV and gets MP4. These two keep the
+    // extension and the container in lockstep in both directions.
+
+    /// <summary>True only while <see cref="SyncFileNameToContainer"/> is rewriting the extension, so
+    /// <see cref="OnOutputFileNameChanged"/> does not read its own write back as a user edit.</summary>
+    private bool _isSyncingFileName;
+
+    private static string ExtensionFor(MergeContainer container)
+        => container == MergeContainer.Mkv ? ".mkv" : ".mp4";
+
+    /// <summary>The container an extension asks for, or null if it names one we do not merge to.</summary>
+    private static MergeContainer? ContainerFor(string? extension)
+    {
+        if (string.Equals(extension, ".mkv", StringComparison.OrdinalIgnoreCase))
+        {
+            return MergeContainer.Mkv;
+        }
+
+        return string.Equals(extension, ".mp4", StringComparison.OrdinalIgnoreCase)
+            ? MergeContainer.Mp4
+            : null;
+    }
+
+    /// <summary>The user typed a file name. If they named a container we support, that IS a choice of
+    /// container — honour it (and it is theirs, so it latches the override; otherwise adding the next
+    /// clip would re-derive the container and rename their file back underneath them). Anything else
+    /// would hand ffmpeg a muxer nobody picked, so it is put back to the target's own extension.</summary>
+    partial void OnOutputFileNameChanged(string value)
+    {
+        if (_isSyncingFileName)
+        {
+            return;
+        }
+
+        if (ContainerFor(Path.GetExtension(value)) is { } chosen)
+        {
+            if (chosen != Target.Container)
+            {
+                OverrideTarget(Target with { Container = chosen });
+            }
+
+            return;
+        }
+
+        SyncFileNameToContainer(Target.Container);
+    }
+
+    /// <summary>Rewrites the output file's extension to match the container. A blank name is left
+    /// alone: there is nothing to put an extension on, and the merge would fail on it anyway.</summary>
+    private void SyncFileNameToContainer(MergeContainer container)
+    {
+        if (string.IsNullOrWhiteSpace(OutputFileName))
+        {
+            return;
+        }
+
+        var wanted = Path.ChangeExtension(OutputFileName, ExtensionFor(container));
+        if (string.Equals(wanted, OutputFileName, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _isSyncingFileName = true;
+        try
+        {
+            OutputFileName = wanted;
+        }
+        finally
+        {
+            _isSyncingFileName = false;
+        }
     }
 
     /// <summary>Re-runs conformance for every row and rebuilds the summary. No probe: the

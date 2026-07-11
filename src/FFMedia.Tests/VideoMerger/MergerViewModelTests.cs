@@ -121,10 +121,16 @@ public class MergerViewModelTests
 
     // ---- helpers -----------------------------------------------------------
 
-    private static MediaInfo Info(int width = 1920, int height = 1080, string codec = "h264", double seconds = 5)
-        => new(TimeSpan.FromSeconds(seconds), "mov,mp4,m4a",
+    private static MediaInfo Info(
+        int width = 1920, int height = 1080, string codec = "h264", double seconds = 5,
+        string container = "mov,mp4,m4a")
+        => new(TimeSpan.FromSeconds(seconds), container,
             new VideoStreamInfo(width, height, new FrameRate(30, 1), codec, "yuv420p", 0),
             new AudioStreamInfo("aac", 48000, 2));
+
+    /// <summary>A clip in a Matroska container — enough of them and the derived target is MKV.</summary>
+    private static MediaInfo Mkv(double seconds = 5)
+        => Info(seconds: seconds, container: "matroska,webm");
 
     /// <summary>A probe that succeeds but found no video track — an audio file.</summary>
     private static MediaInfo AudioOnly()
@@ -872,6 +878,301 @@ public class MergerViewModelTests
         Assert.Equal(@"D:\videos\holiday.mp4", h.Vm.OutputPath);
 
         Assert.Equal(2, raised.Count(name => name == "OutputPath"));
+    }
+
+    // ---- the container and the file extension MUST agree --------------------
+    //
+    // ConcatArgsBuilder emits no `-f`, so ffmpeg picks its MUXER FROM THE OUTPUT FILE'S EXTENSION;
+    // Target.Container only gates `-movflags +faststart`. Before this was reconciled, a derived MKV
+    // target wrote a real MP4 named "merged.mp4": the user picked MKV and got MP4.
+
+    [Fact]
+    public async Task ADerivedMkvTarget_RenamesTheOutputToMkv()
+    {
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mkv", Mkv());
+        h.Analyzer.Returns(@"C:\b.mkv", Mkv());
+
+        await h.Vm.AddClipsAsync([@"C:\a.mkv", @"C:\b.mkv"]);
+
+        Assert.Equal(MergeContainer.Mkv, h.Vm.Target.Container);
+        Assert.Equal("merged.mkv", h.Vm.OutputFileName);
+        Assert.Equal(@"C:\out\merged.mkv", h.Vm.OutputPath);
+        Assert.False(h.Vm.IsTargetOverridden); // a derivation is not an override
+    }
+
+    [Fact]
+    public async Task TheFileTheEngineIsToldToWrite_MatchesTheContainerTheUserGets()
+    {
+        // The one that matters: whatever the target says, the PATH handed to ffmpeg must end in the
+        // extension for that container, because the extension is what actually chooses the muxer.
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mkv", Mkv());
+        h.Analyzer.Returns(@"C:\b.mkv", Mkv());
+        await h.Vm.AddClipsAsync([@"C:\a.mkv", @"C:\b.mkv"]);
+
+        await h.Vm.MergeCommand.ExecuteAsync(null);
+
+        var request = h.Merger.Request;
+        Assert.NotNull(request);
+        Assert.Equal(MergeContainer.Mkv, request.Target.Container);
+        Assert.Equal(@"C:\out\merged.mkv", request.OutputPath);
+        Assert.Equal(".mkv", Path.GetExtension(request.OutputPath));
+    }
+
+    [Fact]
+    public async Task ChoosingAContainer_RewritesTheExtension_AndIsATargetOverride()
+    {
+        var h = await BuildWithClipsAsync(2); // MP4 clips → derived MP4
+        h.Vm.OutputFileName = "holiday.mp4";
+
+        h.Vm.SelectedContainer = MergeContainer.Mkv;
+
+        Assert.Equal(MergeContainer.Mkv, h.Vm.Target.Container);
+        Assert.Equal("holiday.mkv", h.Vm.OutputFileName);
+        Assert.Equal(@"C:\out\holiday.mkv", h.Vm.OutputPath);
+        Assert.True(h.Vm.IsTargetOverridden);
+    }
+
+    [Fact]
+    public async Task TypingAnMkvExtension_ChoosesTheMkvContainer()
+    {
+        // The name IS the muxer, so typing one is choosing a container. Saying nothing would write an
+        // MP4 called holiday.mkv.
+        var h = await BuildWithClipsAsync(2);
+
+        h.Vm.OutputFileName = "holiday.mkv";
+
+        Assert.Equal(MergeContainer.Mkv, h.Vm.Target.Container);
+        Assert.Equal(MergeContainer.Mkv, h.Vm.SelectedContainer);
+        Assert.Equal("holiday.mkv", h.Vm.OutputFileName);
+        Assert.True(h.Vm.IsTargetOverridden);
+    }
+
+    [Fact]
+    public async Task AContainerChosenByTypingIt_SurvivesAddingAnotherClip()
+    {
+        // It latches the override for a reason: without that, adding the next MP4 clip would re-derive
+        // the container back to MP4 and rename the user's file underneath them.
+        var h = await BuildWithClipsAsync(2);
+        h.Vm.OutputFileName = "holiday.mkv";
+        h.Analyzer.Returns(@"C:\extra.mp4", Info());
+
+        await h.Vm.AddClipsAsync([@"C:\extra.mp4"]);
+
+        Assert.Equal(MergeContainer.Mkv, h.Vm.Target.Container);
+        Assert.Equal("holiday.mkv", h.Vm.OutputFileName);
+    }
+
+    [Theory]
+    [InlineData("holiday.mov")]  // a container we do not merge to
+    [InlineData("holiday.webm")]
+    [InlineData("holiday")]      // no extension at all — ffmpeg cannot guess a muxer from that
+    public async Task AnExtensionWeDoNotMergeTo_IsPutBackToTheContainersOwn(string typed)
+    {
+        var h = await BuildWithClipsAsync(2);
+
+        h.Vm.OutputFileName = typed;
+
+        Assert.Equal("holiday.mp4", h.Vm.OutputFileName);
+        Assert.Equal(MergeContainer.Mp4, h.Vm.Target.Container);
+        Assert.False(h.Vm.IsTargetOverridden); // nothing was overridden — we only fixed the name
+    }
+
+    [Fact]
+    public async Task ResettingTheTarget_TakesTheFileExtensionBackWithIt()
+    {
+        var h = await BuildWithClipsAsync(2); // MP4 clips
+        h.Vm.SelectedContainer = MergeContainer.Mkv;
+        Assert.Equal("merged.mkv", h.Vm.OutputFileName);
+
+        h.Vm.ResetTargetToDerived();
+
+        Assert.Equal(MergeContainer.Mp4, h.Vm.Target.Container);
+        Assert.Equal("merged.mp4", h.Vm.OutputFileName);
+        Assert.Equal(@"C:\out\merged.mp4", h.Vm.OutputPath);
+    }
+
+    [Fact]
+    public async Task SettingTheContainerToWhatItAlreadyIs_IsNotAnOverride()
+    {
+        // A ComboBox echoes its own selection back on load.
+        var h = await BuildWithClipsAsync(2);
+
+        h.Vm.SelectedContainer = MergeContainer.Mp4;
+
+        Assert.False(h.Vm.IsTargetOverridden);
+    }
+
+    // ---- the target, field by field (spec §7.3: every field overridable) -----
+
+    [Fact]
+    public async Task EditingATargetFieldThroughItsProjection_OverridesTheTargetAndRebadges()
+    {
+        var h = await BuildWithClipsAsync(2);
+        var raised = new List<string>();
+        h.Vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName!);
+        Assert.Equal("Conforms", h.Vm.Clips[0].Badge);
+
+        h.Vm.TargetWidth = 3840;
+        h.Vm.TargetHeight = 2160;
+
+        Assert.Equal(3840, h.Vm.Target.Width);
+        Assert.Equal(2160, h.Vm.Target.Height);
+        Assert.Equal(3840, h.Vm.TargetWidth);
+        Assert.True(h.Vm.IsTargetOverridden);
+        Assert.Equal("Re-encode", h.Vm.Clips[0].Badge);
+        Assert.Contains("TargetWidth", raised);
+        Assert.Contains("TargetHeight", raised);
+    }
+
+    [Fact]
+    public async Task EveryTargetProjectionWritesThroughToTheTarget()
+    {
+        var h = await BuildWithClipsAsync(2);
+
+        h.Vm.TargetCrf = 18;
+        h.Vm.SelectedVideoCodec = MergeVideoCodec.H265;
+        h.Vm.SelectedAudioCodec = MergeAudioCodec.Opus;
+        h.Vm.TargetAudioSampleRate = 44_100;
+        h.Vm.TargetAudioChannels = 6;
+        h.Vm.SelectedFrameRate = h.Vm.FrameRates.Single(o => o.Rate == new FrameRate(60, 1));
+
+        Assert.Equal(18, h.Vm.Target.Crf);
+        Assert.Equal(MergeVideoCodec.H265, h.Vm.Target.VideoCodec);
+        Assert.Equal(MergeAudioCodec.Opus, h.Vm.Target.AudioCodec);
+        Assert.Equal(44_100, h.Vm.Target.AudioSampleRate);
+        Assert.Equal(6, h.Vm.Target.AudioChannels);
+        Assert.Equal(new FrameRate(60, 1), h.Vm.Target.FrameRate);
+        Assert.True(h.Vm.IsTargetOverridden);
+    }
+
+    [Fact]
+    public async Task ATargetFieldSetToItsCurrentValue_IsNotAnOverride()
+    {
+        var h = await BuildWithClipsAsync(2); // derived 1920x1080, CRF 20
+
+        h.Vm.TargetWidth = 1920;
+        h.Vm.TargetCrf = 20;
+        h.Vm.SelectedVideoCodec = MergeVideoCodec.H264;
+
+        Assert.False(h.Vm.IsTargetOverridden);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1080)]
+    public async Task ANonPositiveDimension_IsIgnored_NotCommittedForFfmpegToChokeOn(int bad)
+    {
+        var h = await BuildWithClipsAsync(2);
+
+        h.Vm.TargetWidth = bad;
+        h.Vm.TargetHeight = bad;
+
+        Assert.Equal(1920, h.Vm.Target.Width);
+        Assert.Equal(1080, h.Vm.Target.Height);
+        Assert.False(h.Vm.IsTargetOverridden);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(52)]
+    public async Task ACrfOutsideZeroToFiftyOne_IsIgnored(int bad)
+    {
+        var h = await BuildWithClipsAsync(2);
+
+        h.Vm.TargetCrf = bad;
+
+        Assert.Equal(20, h.Vm.Target.Crf);
+        Assert.False(h.Vm.IsTargetOverridden);
+    }
+
+    [Fact]
+    public void ANonStandardFrameRate_IsStillOfferedInTheDropdown()
+    {
+        // A 12 fps timelapse derives a rate that is not one of the eight standards. If the dropdown
+        // could not show it, the ComboBox would sit blank on a perfectly valid target.
+        var h = Build();
+        Assert.DoesNotContain(h.Vm.FrameRates, o => o.Rate == new FrameRate(12, 1));
+
+        h.Vm.Target = h.Vm.Target with { FrameRate = new FrameRate(12, 1) };
+
+        var selected = Assert.Single(h.Vm.FrameRates, o => o.Rate == new FrameRate(12, 1));
+        Assert.Same(selected, h.Vm.SelectedFrameRate);
+        Assert.Equal("12 fps", selected.Label);
+    }
+
+    [Fact]
+    public void FrameRateOption_LabelsTheDropFrameRatesAsTheirDecimal()
+    {
+        var h = Build();
+
+        Assert.Equal(
+            new[] { "23.976 fps", "24 fps", "25 fps", "29.97 fps", "30 fps", "50 fps", "59.94 fps", "60 fps" },
+            h.Vm.FrameRates.Select(o => o.Label).ToArray());
+        Assert.Equal(new FrameRate(30, 1), h.Vm.SelectedFrameRate!.Rate); // the default target's rate
+    }
+
+    [Fact]
+    public void SelectedFrameRate_IgnoresTheNullAComboBoxPushesWhileRebinding()
+    {
+        var h = Build();
+
+        h.Vm.SelectedFrameRate = null;
+
+        Assert.Equal(new FrameRate(30, 1), h.Vm.Target.FrameRate);
+        Assert.False(h.Vm.IsTargetOverridden);
+    }
+
+    // ---- drag-to-reorder ----------------------------------------------------
+
+    [Fact]
+    public async Task MoveTo_DropsTheClipAtTheGivenIndex()
+    {
+        var h = await BuildWithAsync("a.mp4", "b.mp4", "c.mp4");
+
+        h.Vm.MoveTo(h.Vm.Clips[0], 2); // drag "a" to the bottom
+
+        Assert.Equal(new[] { "b.mp4", "c.mp4", "a.mp4" }, Names(h.Vm));
+    }
+
+    [Fact]
+    public async Task MoveTo_ResyncsTheLocksItShifted()
+    {
+        // Same invariant the Move/Remove commands keep: a lock pins the SLOT a row occupies, so a
+        // drag past a locked row must re-capture that row's index or the next shuffle teleports it.
+        var h = await BuildWithAsync("a.mp4", "b.mp4", "c.mp4");
+        h.Vm.Clips[2].SetLock(locked: true, index: 2);
+
+        h.Vm.MoveTo(h.Vm.Clips[0], 2); // "c" slides up to index 1
+
+        Assert.Equal("c.mp4", h.Vm.Clips[1].FileName);
+        Assert.Equal(1, h.Vm.Clips[1].LockedIndex);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(3)]
+    public async Task MoveTo_OutsideTheList_IsANoOp_NotAThrow(int index)
+    {
+        // Dropping on empty space below the last row is a normal thing for a user to do.
+        var h = await BuildWithAsync("a.mp4", "b.mp4", "c.mp4");
+
+        h.Vm.MoveTo(h.Vm.Clips[0], index);
+
+        Assert.Equal(new[] { "a.mp4", "b.mp4", "c.mp4" }, Names(h.Vm));
+    }
+
+    [Fact]
+    public async Task MoveTo_AClipThatIsNotInTheList_IsANoOp()
+    {
+        var h = await BuildWithAsync("a.mp4", "b.mp4");
+        var stranger = new MergeClipViewModel(new MergeClip(@"C:\stranger.mp4", Info()));
+
+        h.Vm.MoveTo(stranger, 0);
+
+        Assert.Equal(new[] { "a.mp4", "b.mp4" }, Names(h.Vm));
+        Assert.Throws<ArgumentNullException>(() => h.Vm.MoveTo(null!, 0));
     }
 
     // ---- the summary line (spec §6.5) --------------------------------------
