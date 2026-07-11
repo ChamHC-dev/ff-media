@@ -58,6 +58,27 @@ public class OrderingTests
     }
 
     [Fact]
+    public void Shuffle_ReachesEveryPermutation_IncludingTheIdentity()
+    {
+        // The teeth of the whole file. Every other test here passes just as happily against the
+        // classic off-by-one Fisher-Yates (`Next(i)` instead of `Next(i + 1)`), which is severely
+        // biased: it can only reach 6 of the 24 orderings of 4 items and can NEVER return the
+        // user's original order — "randomize" would silently refuse to leave a list alone.
+        // Only a distribution check catches that, so pin it here.
+        var input = Clips(("a", null), ("b", null), ("c", null), ("d", null));
+        var identity = string.Concat(input.Select(c => c.Name));
+
+        var seen = new HashSet<string>();
+        for (var seed = 0; seed < 2_000; seed++)
+        {
+            seen.Add(string.Concat(Ordering.Shuffle(input, c => c.Locked, seed).Select(c => c.Name)));
+        }
+
+        Assert.Equal(24, seen.Count); // 4! — every ordering is reachable
+        Assert.Contains(identity, seen);
+    }
+
+    [Fact]
     public void Shuffle_DiffersAcrossSeeds()
     {
         var input = Clips(("a", null), ("b", null), ("c", null), ("d", null), ("e", null), ("f", null));
