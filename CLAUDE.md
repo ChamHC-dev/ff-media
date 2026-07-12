@@ -29,9 +29,60 @@ milestones. Read it before making design decisions.
 
 ---
 
+---
+
+## ▶️ RESUME HERE (next session)
+
+**The work queued up and ready to execute: M8 — the GIF Maker.**
+
+- **Plan:** [`docs/superpowers/plans/2026-07-12-m8-gif-maker.md`](docs/superpowers/plans/2026-07-12-m8-gif-maker.md)
+  — 8 TDD tasks, complete with code. **It opens with a "🚦 START HERE" section written for an agent with
+  zero context. Read that first.**
+- **Spec (the *what*):** [`docs/superpowers/specs/2026-07-12-gif-maker-design.md`](docs/superpowers/specs/2026-07-12-gif-maker-design.md)
+- **How to execute:** invoke `superpowers:subagent-driven-development` with the plan. (That skill keeps a
+  ledger at `.superpowers/sdd/progress.md` — **check it before dispatching anything**; if it lists tasks
+  as complete, they are done, and you resume at the first that is not.)
+- **Branch:** `feat/m8-gif-maker`. Branch off `main` **if PR #26 (the spec) is merged** — check whether
+  `docs/superpowers/specs/2026-07-12-gif-maker-design.md` exists on `main`; if it does not, branch off
+  `docs/gif-maker-design` instead, so the spec is present.
+
+**Open PRs at hand-off** (check whether they were merged overnight before assuming anything):
+
+| PR | What | Must it merge first? |
+|---|---|---|
+| **#25** | `fix/delta-updates` — release workflow builds delta packages | No, but it is the only thing standing between users and 190 MB updates. |
+| **#26** | `docs/gif-maker-design` — the M8 spec | **Yes, effectively** — the plan and spec belong together. |
+
+**Repo state at hand-off:** `main` green — Release build **0 warnings / 0 errors**, **642/642** unit
+tests, **4/4** merge integration tests. Latest release **v1.1.1** (live, and its notes are written).
+
+---
+
 ## 📓 Progress Log
 
 _Newest first. One entry per completed task/session._
+
+### 2026-07-12 — M8 GIF Maker: implementation plan (no code)
+
+- **Done:** wrote [`docs/superpowers/plans/2026-07-12-m8-gif-maker.md`](docs/superpowers/plans/2026-07-12-m8-gif-maker.md)
+  — **8 TDD tasks**, each with the actual code and the actual test bodies: (1) promote `Resolution` →
+  `FFMedia.Media` and `TrimParsing.TryParse` → `FFMedia.Core` (a tool must never reference another tool);
+  (2) `GifBounds`; (3) `GifArgsBuilder` (the two passes); (4) the calibrated size estimate; (5)
+  `GifService` (preflight → two passes → **re-probe the output** → cleanup on every path); (6)
+  `GifMakerViewModel`; (7) the page + `ITool` + DI + tooltips; (8) a real-ffmpeg integration test + docs.
+- **Written to be picked up cold.** The plan opens with a **🚦 START HERE** section — repo state, the
+  standing rules, the verification gate, the hard-won lessons (ffmpeg's exit code cannot be trusted; a
+  `Style` with no `BasedOn` silently discards WPF-UI's theming; a `Page` must not nest a `ScrollViewer`),
+  and every exact signature it will build against. `CLAUDE.md` now also has a **▶️ RESUME HERE** section
+  at the top pointing straight at it.
+- **Facts resolved so the next agent inherits none of my guesses:** `JsonStore<T>` lives in
+  `FFMedia.Core.Persistence` (**not** `Storage`) and its `Load` takes a **factory**, not a parameterless
+  call — I had both wrong in the first draft and corrected them against `SpeedProfileStore` before
+  committing. Also pre-verified: `SymbolRegular.Gif24` exists, `palettegen`/`paletteuse` exist, `-to` is
+  absolute, and the seek is frame-accurate.
+- **Verified:** nothing to build — **documentation only, no code touched**.
+- **Next:** execute the plan (`superpowers:subagent-driven-development`). Delivered via branch
+  `docs/gif-maker-design` → PR #26 (the plan rides with the spec).
 
 ### 2026-07-12 — M8 GIF Maker: design (spec only, no code)
 
