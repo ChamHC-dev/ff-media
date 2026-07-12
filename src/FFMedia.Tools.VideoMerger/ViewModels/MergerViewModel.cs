@@ -121,6 +121,15 @@ public partial class MergerViewModel : ObservableObject
 
     // ---- the target, projected one field at a time (spec §7.3: "every field overridable") --------
 
+    /// <summary>Rounds an overridden dimension DOWN to even, exactly as
+    /// <see cref="MergeTargetDerivation"/> does when it derives one.</summary>
+    /// <remarks>yuv420p subsamples chroma 2×2, so libx264 rejects an odd width or height outright —
+    /// the derivation rounds for that reason and says so at length. Overriding the field by hand must
+    /// not be a way back around it: type 1921 and every clip's normalize pass would die on
+    /// <c>scale=1921:1081</c>, after the preflight has already promised the merge would work. Silently
+    /// snapping to 1920 is the same answer the derived path would have given.</remarks>
+    private static int ToEven(int value) => value - (value % 2);
+
     /// <remarks><para>The page edits the target through these projections rather than binding into
     /// <see cref="Target"/> itself, for two reasons. <see cref="MergeTarget"/> is a record, so its
     /// properties are <c>init</c>-only — a two-way binding to <c>Target.Width</c> has no setter to
@@ -131,15 +140,6 @@ public partial class MergerViewModel : ObservableObject
     /// <see cref="IsTargetOverridden"/> EXPLICITLY. Writing back the value that is already there is
     /// still a no-op — a ComboBox echoing its own selection on load must not be mistaken for a user
     /// edit (the same rule <see cref="SelectedFitMode"/> follows).</para></remarks>
-    /// <summary>Rounds an overridden dimension DOWN to even, exactly as
-    /// <see cref="MergeTargetDerivation"/> does when it derives one.</summary>
-    /// <remarks>yuv420p subsamples chroma 2×2, so libx264 rejects an odd width or height outright —
-    /// the derivation rounds for that reason and says so at length. Overriding the field by hand must
-    /// not be a way back around it: type 1921 and every clip's normalize pass would die on
-    /// <c>scale=1921:1081</c>, after the preflight has already promised the merge would work. Silently
-    /// snapping to 1920 is the same answer the derived path would have given.</remarks>
-    private static int ToEven(int value) => value - (value % 2);
-
     public int TargetWidth
     {
         get => Target.Width;

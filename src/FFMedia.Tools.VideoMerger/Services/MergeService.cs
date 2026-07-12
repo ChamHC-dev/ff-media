@@ -83,10 +83,6 @@ public sealed class MergeService : IMergeService
         return null;
     }
 
-    /// <summary>Proves the output really contains every clip. ffmpeg's concat demuxer exits 0 even
-    /// when it silently drops a segment it cannot decode, so a short output is the only signal that
-    /// this happened — and shipping a truncated video the user believes is complete is the worst
-    /// thing this tool could do.</summary>
     /// <summary>How much shorter than the sum of its clips the output may legitimately be.</summary>
     /// <remarks><para>A fixed 1 s was too blunt in the direction that costs the user a file. Every clip
     /// contributes a little rounding of its own (the container's duration versus the stream the
@@ -108,6 +104,10 @@ public sealed class MergeService : IMergeService
         return accumulated < half ? accumulated : half;
     }
 
+    /// <summary>Proves the output really contains every clip. ffmpeg's concat demuxer exits 0 even
+    /// when it silently drops a segment it cannot decode, so a short output is the only signal that
+    /// this happened — and shipping a truncated video the user believes is complete is the worst
+    /// thing this tool could do.</summary>
     private async Task<Result> VerifyOutputAsync(
         string outputPath, TimeSpan expected, IReadOnlyList<MergeClip> clips, CancellationToken ct)
     {

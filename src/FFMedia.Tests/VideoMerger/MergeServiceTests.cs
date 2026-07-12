@@ -343,6 +343,28 @@ public class MergeServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ADroppedSHORTClip_IsStillCaught_WhenThereAreManyOfThem()
+    {
+        // The case that pins the CLAMP, and the reason the previous test cannot: with 5s clips the
+        // accumulated allowance (3s for 40 clips) is already smaller than a dropped clip (5s), so a
+        // clamped and an unclamped tolerance give the SAME answer and the fixture cannot tell them
+        // apart. Short clips are where it bites.
+        //
+        // 40 clips x 1s: the accumulated allowance alone would be 3s — THREE TIMES a whole clip. An
+        // unclamped tolerance would wave a dropped clip straight through and hand the user a
+        // truncated video reported as a success. Clamped to half the shortest clip (0.5s), it is
+        // caught.
+        var clips = Enumerable.Range(0, 40).Select(i => Conforming($"s{i}.mp4", seconds: 1)).ToArray();
+        var request = Request(clips);
+
+        // 40s expected, 39s out: exactly one 1-second clip is missing.
+        var result = await BuildVerifying(new FakeFfmpeg(), TimeSpan.FromSeconds(39)).MergeAsync(request);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("at least one clip was dropped", result.Error);
+    }
+
+    [Fact]
     public async Task MergeAsync_FailsWhenTheMergedFileCannotBeReadBack()
     {
         var request = Request(Conforming("a.mp4"), Conforming("b.mp4"));
