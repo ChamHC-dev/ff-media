@@ -27,9 +27,40 @@ jobs:
           $v = $env:GITHUB_REF_NAME.TrimStart('v')
           echo "PACK_VERSION=$v" >> $env:GITHUB_ENV
 
+      # Velopack builds a DELTA package by diffing against the previous release's .nupkg — and it can
+      # only do that if that .nupkg is sitting in the output directory. A CI runner starts from an
+      # empty checkout, so there was nothing to diff against and `vpk pack` silently emitted a FULL
+      # package only: no error, no warning, and every update was a ~190 MB download even when the
+      # release changed nothing but a few strings. Pull the previous release in first.
+      #
+      # continue-on-error: the very first release of a channel has nothing to download. That is not a
+      # failure — it just means this build produces a full package, which is correct.
+      - name: Download the previous release (so pack can build a delta)
+        shell: pwsh
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          vpk download github `
+            --repoUrl https://github.com/CharmHC/ff-media `
+            --token $env:GITHUB_TOKEN `
+            --outputDir artifacts/releases
+
       - name: Pack (publish + vpk pack)
         shell: pwsh
         run: ./build/pack.ps1 -Version $env:PACK_VERSION
+
+      # Proves the delta actually got built, rather than trusting that it did. This is exactly the
+      # failure that went unnoticed through v1.1.0 and v1.1.1: pack succeeds either way, so nothing
+      # complains — the only evidence is whether a *-delta.nupkg exists.
+      - name: Report what was packed
+        shell: pwsh
+        run: |
+          $packages = Get-ChildItem artifacts/releases -Filter *.nupkg | Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB)}}
+          $packages | Format-Table | Out-String | Write-Host
+          if (-not (Get-ChildItem artifacts/releases -Filter *-delta.nupkg)) {
+            Write-Host "::warning::No delta package was produced - clients will download the FULL package for this update. Expected for the first release on a channel; otherwise the previous-release download above did not work."
+          }
 
       - name: Publish to GitHub Release
         shell: pwsh
