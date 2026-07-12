@@ -130,7 +130,7 @@ public class GifServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateAsync_DeletesTheTempPalette_WhenTheRenderFails()
+    public async Task CreateAsync_DeletesTheTempPaletteAndTheHalfWrittenGif_WhenTheRenderFails()
     {
         var (service, ffmpeg, _, _, request) = Build();
         ffmpeg.Behavior = call => call == 2 ? Result.Failure("Error while opening encoder") : Result.Success();
@@ -139,6 +139,12 @@ public class GifServiceTests : IDisposable
 
         Assert.False(result.IsSuccess);
         Assert.Empty(Directory.GetFiles(_dir, "*.png"));
+
+        // The render pass already wrote real bytes to OutputPath before it reported failure -- ffmpeg
+        // can be killed (or, as here, error out) after it has started writing the file. A failure that
+        // leaves that file behind is a failure the user won't notice: they'll find out.gif sitting in
+        // the folder and believe the GIF was made.
+        Assert.False(File.Exists(request.OutputPath));
     }
 
     [Fact]
