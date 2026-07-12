@@ -33,6 +33,60 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-12 — M7 PR 2 follow-ups: the six bugs the headed click-through found
+
+- **Context:** PR 2 shipped green (597 tests) with one honest caveat — *"the page itself is not
+  verified; the layout, both drag gestures and the dark-mode rendering need the user's visual
+  check."* The user did that check. It found **six** defects. **Four were invisible to the entire
+  suite, for one reason: nothing ever instantiated the page.** PR #18 was merged before these fixes
+  existed, so they land as a follow-up branch off `main`.
+- **The bug worth remembering — Shuffle could pin a row forever.** `ShuffleSeed` was seeded once at
+  construction and **never re-seeded**, even though the comment right above it claimed *"the UI
+  re-seeds it from the clock on every Shuffle click."* Nothing did. So every click built
+  `new Random(sameSeed)` and replayed the **identical permutation** — and any index that permutation
+  maps to itself is a row that can **never move**, however many times the user clicks. Reproduced
+  against the real `Ordering.Shuffle`: **~63% of seeds pin at least one row forever**, 17–33% pin the
+  **2nd row** specifically (exactly what the user saw), and the list only ever cycles through ~3
+  distinct orders. `Ordering.Shuffle` itself was flawless — a textbook unbiased Fisher–Yates being fed
+  a constant. **A correct algorithm and a correct call site still composed into a broken feature.**
+- **The recurring test lesson, a third time.** Every shuffle test assigned `ShuffleSeed` immediately
+  before each `Shuffle()` call — so the suite **simulated a re-seeding UI that did not exist**. No test
+  ever clicked Shuffle twice. A test only pins an invariant if the fixture **varies along the axis the
+  invariant is about**. Mutation-proven: deleting the fix fails exactly the new test and nothing else.
+- **I broke the app once, mid-fix.** My first dark-mode fix was
+  `BasedOn="{StaticResource {x:Type ListViewItem}}"` — a key I *assumed* existed. `StaticResource`
+  resolves at **page-load**, not compile time, so it built clean, passed all 603 tests, and threw
+  `XamlParseException` the moment the user clicked the nav item. Enumerating `ControlsDictionary` at
+  runtime gave the real answer and **corrected my original diagnosis too**: WPF-UI keys its implicit
+  styles to its **own subclasses** (`Wpf.Ui.Controls.ListView`) and ships **nothing** for the plain
+  WPF `ListView` — so the box was never going to be dark, `BasedOn` or not. Fix: use `ui:ListView`.
+  **Lesson: verify the resource key exists; do not reason about what a library "surely" registers.**
+- **The scroll bug, found by measuring instead of guessing.** Wheel did nothing outside the clip list.
+  Hosting the page in the real `NavigationViewContentPresenter` and reading the numbers:
+  shell's `ScrollViewer` `Scrollable=185`, page's own `Scrollable=0`. **WPF-UI already wraps every page
+  in a `ScrollViewer`** — which is why no other page in the app has one. MergerPage added a second; the
+  outer one hands the inner unbounded height so it can never scroll, **yet WPF's `ScrollViewer` marks
+  wheel events handled even when it cannot move**. It swallowed every tick while the shell's scroller,
+  with 185 px to give, never saw one. Removed it.
+- **Also fixed:** the clip list was wiped by navigation (`MergerViewModel` was `AddTransient`; the
+  merger's clips live *in the VM*, unlike the downloader's queue which lives in a singleton
+  `DownloadManager`) → now **singleton**, deliberately reversing PR 2's tested decision; a **Clear all**
+  button beside Shuffle (frozen during a merge, like every other mutator); and an outline on the clip
+  box (`ui:ListView` ships no border, so the drop target had no visible edge).
+- **The durable fix — `MergerPageLoadTests`.** A module's `Page` lives in the *module*, not the WinExe,
+  so the test project **can** instantiate it. It now builds the real page on an STA thread, against the
+  real `ThemesDictionary`+`ControlsDictionary`, inside the real `NavigationViewContentPresenter`. A bad
+  resource key and a nested scroller now **fail `dotnet test`** instead of failing in front of the user;
+  both are mutation-proven (re-introducing each bug fails exactly its own test). Any new tool page gets
+  the same pair.
+- **Verified:** Release build **0/0**; **605/605** unit tests (597 → 605, 8 new); **3/3** merge
+  integration tests still pass against the real bundled ffmpeg. **Not verified:** the user's re-check of
+  the six fixes on screen.
+- **Next:** user clicks through the six fixes; then delete the `feat/m7-merger-ui` branch + worktree.
+  SDD → **v0.16** (§13 gains two new rules: *use `ui:` controls, never their plain WPF namesakes*, and
+  *a `Page` must not contain its own `ScrollViewer`*; §14 gains page-load tests). Delivered via branch
+  `fix/m7-merger-ui-followups` → PR.
+
 ### 2026-07-12 — M7 PR 2: Video Merger UI — **M7 complete**
 
 - **Done:** the merger's UI module — `MergeClipViewModel` + `MergerViewModel` (headless, every
