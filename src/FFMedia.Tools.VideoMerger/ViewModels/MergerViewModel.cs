@@ -95,6 +95,37 @@ public partial class MergerViewModel : ObservableObject
 
     private const string NoClipsSummary = "Add at least two clips to merge.";
 
+    /// <summary>What the user may choose, given the clips. Rebuilt on every clip-list change; the
+    /// page binds each ComboBox straight at these lists, so a pointless value is not merely rejected
+    /// — it is never shown.</summary>
+    [ObservableProperty] private TargetBounds _bounds = TargetBounds.Empty;
+
+    /// <summary>False with an empty clip list: there is no source to bound the output against, so the
+    /// page disables the Output section (a merge needs two clips anyway).</summary>
+    public bool HasClips => Clips.Count > 0;
+
+    /// <summary>MP4 + Opus muxes fine (verified against ffmpeg 8.1 — all 8 codec/container pairs do),
+    /// but QuickTime and most TVs cannot decode it. A playability footgun, not an invalid option:
+    /// warn, never block.</summary>
+    public bool ShowOpusInMp4Warning
+        => Target.Container == MergeContainer.Mp4 && Target.AudioCodec == MergeAudioCodec.Opus;
+
+    /// <summary>The output resolution as a single choice. Two independent width/height boxes let the
+    /// user build 1920 x 102 — positive, even, encodable, absurd. A pair cannot.</summary>
+    public Resolution? SelectedResolution
+    {
+        get => new(Target.Width, Target.Height);
+        set
+        {
+            if (value is null || (value.Width == Target.Width && value.Height == Target.Height))
+            {
+                return;
+            }
+
+            OverrideTarget(Target with { Width = value.Width, Height = value.Height });
+        }
+    }
+
     public IReadOnlyList<FitMode> FitModes { get; } = Enum.GetValues<FitMode>();
 
     /// <summary>How a clip whose aspect does not match the target is fitted into it.</summary>
@@ -750,6 +781,20 @@ public partial class MergerViewModel : ObservableObject
             SetTarget(Derive(), overridden: false);
         }
 
+        var infos = Clips.Select(c => c.Clip.Info).ToList();
+        Bounds = TargetBounds.From(infos);
+
+        // The ceiling MOVES as clips come and go. An override that was legal a moment ago can now be
+        // above it — the user deleted the only 1080p clip and their 1080p target would upscale every
+        // remaining clip. Snap it down silently, keeping the override: their intent to go SMALLER is
+        // still theirs.
+        var clamped = Target.ClampTo(Bounds);
+        if (clamped != Target)
+        {
+            SetTarget(clamped, IsTargetOverridden);
+        }
+
+        OnPropertyChanged(nameof(HasClips));
         OnPropertyChanged(nameof(CanMerge));
 
         // A raised PropertyChanged does not reach ICommand: the button caches its verdict until the
@@ -807,6 +852,8 @@ public partial class MergerViewModel : ObservableObject
         OnPropertyChanged(nameof(TargetAudioChannels));
         OnPropertyChanged(nameof(SelectedContainer));
         OnPropertyChanged(nameof(SelectedFrameRate));
+        OnPropertyChanged(nameof(SelectedResolution));
+        OnPropertyChanged(nameof(ShowOpusInMp4Warning));
     }
 
     /// <summary>A derived rate that is not one of the standards still has to appear in the dropdown,
