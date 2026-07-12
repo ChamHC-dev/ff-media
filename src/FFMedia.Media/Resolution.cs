@@ -1,4 +1,4 @@
-namespace FFMedia.Tools.VideoMerger.Models;
+namespace FFMedia.Media;
 
 /// <summary>One selectable output resolution. Exists so the page can bind a single ComboBox to a
 /// width/height PAIR: two independent text boxes let the user build 1920 × 102 — positive, even,
