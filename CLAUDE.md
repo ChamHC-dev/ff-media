@@ -46,15 +46,20 @@ milestones. Read it before making design decisions.
   `docs/superpowers/specs/2026-07-12-gif-maker-design.md` exists on `main`; if it does not, branch off
   `docs/gif-maker-design` instead, so the spec is present.
 
-**Open PRs at hand-off** (check whether they were merged overnight before assuming anything):
-
-| PR | What | Must it merge first? |
-|---|---|---|
-| **#25** | `fix/delta-updates` — release workflow builds delta packages | No, but it is the only thing standing between users and 190 MB updates. |
-| **#26** | `docs/gif-maker-design` — the M8 spec | **Yes, effectively** — the plan and spec belong together. |
+**Open PR at hand-off:** **#26** — `docs/gif-maker-design`, carrying **both the M8 spec and this plan**.
+It should be merged before (or as) the work starts, so the spec and plan live on `main`.
+*(PR #25, the delta-package fix, was merged — `main` @ `628bfcc`. `release.yml` now runs
+`vpk download github` before packing, so the **next** release will be the first to ship a delta:
+~19 MB instead of ~190 MB. That has not been exercised by a real tag yet; the workflow raises a CI
+**warning** if no delta is produced, so watch for it.)*
 
 **Repo state at hand-off:** `main` green — Release build **0 warnings / 0 errors**, **642/642** unit
-tests, **4/4** merge integration tests. Latest release **v1.1.1** (live, and its notes are written).
+tests, **4/4** merge integration tests. Latest release **v1.1.1** (live; notes written).
+
+**Still not verified by a human, from earlier work** — worth a click-through when convenient: the merger
+page's clip-list **column alignment** (`Grid.IsSharedSizeScope` is the right mechanism, but alignment is
+a *pixel* claim only eyes settle), the **pin toggle**, and whether the new **plain-English tooltips**
+actually land for a casual reader.
 
 ---
 
