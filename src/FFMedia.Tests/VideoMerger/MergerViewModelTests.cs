@@ -934,6 +934,71 @@ public class MergerViewModelTests
         Assert.True(h.Vm.IsTargetOverridden);
     }
 
+    [Fact]
+    public async Task WhileMerging_TheClipListIsFrozen()
+    {
+        // The merge runs against a SNAPSHOT of the list taken when Merge was clicked, and
+        // MergeProgress.ClipPercents is indexed by that snapshot. If the list can still move, row N
+        // starts showing clip M's progress, a removed clip is still in the output, and OnMergeProgress
+        // — which runs on ffmpeg's stdout thread — indexes a collection the UI thread is mutating.
+        var h = await BuildWithClipsAsync(3);
+        var first = h.Vm.Clips[0];
+        var order = h.Vm.Clips.Select(c => c.SourcePath).ToList();
+
+        // Hold the merge open so the list is provably frozen WHILE it runs, not merely after.
+        var gate = new TaskCompletionSource();
+        h.Merger.Behavior = async (request, _, _) =>
+        {
+            await gate.Task;
+            return Result<string>.Success(request.OutputPath);
+        };
+
+        var merging = h.Vm.MergeCommand.ExecuteAsync(null);
+        Assert.True(h.Vm.IsMerging);
+
+        Assert.False(h.Vm.CanEditClips);
+        Assert.False(h.Vm.RemoveClipCommand.CanExecute(first));
+        Assert.False(h.Vm.MoveUpCommand.CanExecute(first));
+        Assert.False(h.Vm.MoveDownCommand.CanExecute(first));
+        Assert.False(h.Vm.ShuffleCommand.CanExecute(null));
+        Assert.False(h.Vm.AddClipsCommand.CanExecute(Array.Empty<string>()));
+
+        // The gestures do not go through a command at all, so CanExecute alone would not save us.
+        h.Vm.RemoveClip(first);
+        h.Vm.MoveTo(first, 2);
+        h.Vm.Shuffle();
+        await h.Vm.AddClipsAsync([@"C:\late.mp4"]);
+
+        Assert.Equal(order, h.Vm.Clips.Select(c => c.SourcePath));
+
+        gate.SetResult();
+        await merging;
+
+        // And it thaws again afterwards, or the page is bricked.
+        Assert.True(h.Vm.CanEditClips);
+        Assert.True(h.Vm.ShuffleCommand.CanExecute(null));
+    }
+
+    [Theory]
+    [InlineData(1921, 1920)]
+    [InlineData(1081, 1080)]
+    public async Task AnOddOverriddenDimension_IsRoundedDownToEven(int typed, int expected)
+    {
+        // yuv420p subsamples chroma 2x2, so libx264 rejects an odd dimension OUTRIGHT.
+        // MergeTargetDerivation.ToEven exists for exactly this; overriding by hand must not be a way
+        // back around it, or every clip's normalize pass dies on scale=1921:1081 — after the preflight
+        // has already promised the merge would work.
+        var h = await BuildWithClipsAsync(2);
+
+        h.Vm.TargetWidth = typed;
+        h.Vm.TargetHeight = typed;
+
+        Assert.Equal(expected, h.Vm.Target.Width);
+        Assert.Equal(expected, h.Vm.Target.Height);
+        Assert.Equal(0, h.Vm.Target.Width % 2);
+        Assert.Equal(0, h.Vm.Target.Height % 2);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("   ")]

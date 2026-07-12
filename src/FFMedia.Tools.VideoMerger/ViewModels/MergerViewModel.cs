@@ -131,16 +131,26 @@ public partial class MergerViewModel : ObservableObject
     /// <see cref="IsTargetOverridden"/> EXPLICITLY. Writing back the value that is already there is
     /// still a no-op — a ComboBox echoing its own selection on load must not be mistaken for a user
     /// edit (the same rule <see cref="SelectedFitMode"/> follows).</para></remarks>
+    /// <summary>Rounds an overridden dimension DOWN to even, exactly as
+    /// <see cref="MergeTargetDerivation"/> does when it derives one.</summary>
+    /// <remarks>yuv420p subsamples chroma 2×2, so libx264 rejects an odd width or height outright —
+    /// the derivation rounds for that reason and says so at length. Overriding the field by hand must
+    /// not be a way back around it: type 1921 and every clip's normalize pass would die on
+    /// <c>scale=1921:1081</c>, after the preflight has already promised the merge would work. Silently
+    /// snapping to 1920 is the same answer the derived path would have given.</remarks>
+    private static int ToEven(int value) => value - (value % 2);
+
     public int TargetWidth
     {
         get => Target.Width;
         set
         {
-            // A non-positive dimension cannot be encoded (libx264 rejects it outright). Ignore it
-            // rather than committing a target the merge would only fail on, minutes later.
-            if (value > 0 && value != Target.Width)
+            // A non-positive dimension cannot be encoded either. Ignore it rather than committing a
+            // target the merge would only fail on, minutes later.
+            var even = ToEven(value);
+            if (even > 0 && even != Target.Width)
             {
-                OverrideTarget(Target with { Width = value });
+                OverrideTarget(Target with { Width = even });
             }
         }
     }
@@ -150,9 +160,10 @@ public partial class MergerViewModel : ObservableObject
         get => Target.Height;
         set
         {
-            if (value > 0 && value != Target.Height)
+            var even = ToEven(value);
+            if (even > 0 && even != Target.Height)
             {
-                OverrideTarget(Target with { Height = value });
+                OverrideTarget(Target with { Height = even });
             }
         }
     }
@@ -290,13 +301,38 @@ public partial class MergerViewModel : ObservableObject
     /// already running would fight it for the temp directory.</summary>
     public bool CanMerge => Clips.Count >= 2 && !IsMerging && HasValidOutputFileName;
 
+    /// <summary>The clip list is FROZEN while a merge runs. Every mutation path is gated on this —
+    /// the buttons through <c>CanExecute</c>, and the gestures (file drop, drag-to-reorder) through an
+    /// explicit guard, because they do not go through a command at all.</summary>
+    /// <remarks><para>Three separate things break if the list moves under a running merge, and the
+    /// worst is not the obvious one.</para>
+    /// <para><b>It corrupts the display.</b> <c>MergeProgress.ClipPercents</c> is indexed by position
+    /// in the <see cref="MergeRequest"/> snapshot taken when Merge was clicked. Reorder the rows and
+    /// row N starts showing clip M's progress.</para>
+    /// <para><b>It makes the page lie.</b> The list would no longer describe the merge that is
+    /// actually running: a removed clip is still in the output, and an added one re-derives
+    /// <see cref="Target"/> — which can rewrite <see cref="OutputFileName"/> out from under a merge
+    /// already writing to the old path.</para>
+    /// <para><b>And it can kill the process.</b> <see cref="OnMergeProgress"/> runs on ffmpeg's stdout
+    /// callback thread and indexes <c>Clips</c>. A concurrent mutation from the UI thread makes that
+    /// throw <see cref="ArgumentOutOfRangeException"/> inside a <c>Process.OutputDataReceived</c>
+    /// handler — which has no catch anywhere up the stack, so it takes the whole app down and strands
+    /// the temp directory. Freezing the list is what makes reporting straight through on the worker
+    /// thread safe (see the note in <see cref="MergeAsync"/>).</para></remarks>
+    public bool CanEditClips => !IsMerging;
+
     /// <summary>Probes each path and appends it. A file the analyzer cannot read — or one with no
     /// video track (an audio file) — is rejected here, at add time (spec §8): letting it into the
     /// list would fail the whole merge much later, after the user has ordered everything.</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanEditClips))]
     public async Task AddClipsAsync(IEnumerable<string> paths)
     {
         ArgumentNullException.ThrowIfNull(paths);
+
+        if (IsMerging)
+        {
+            return; // the page's file-DROP handler does not go through the command's CanExecute
+        }
 
         foreach (var path in paths)
         {
@@ -321,10 +357,15 @@ public partial class MergerViewModel : ObservableObject
         Recompute();
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanEditClips))]
     public void RemoveClip(MergeClipViewModel clip)
     {
         ArgumentNullException.ThrowIfNull(clip);
+
+        if (IsMerging)
+        {
+            return;
+        }
 
         if (Clips.Remove(clip))
         {
@@ -333,10 +374,15 @@ public partial class MergerViewModel : ObservableObject
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanEditClips))]
     public void MoveUp(MergeClipViewModel clip)
     {
         ArgumentNullException.ThrowIfNull(clip);
+
+        if (IsMerging)
+        {
+            return;
+        }
 
         var index = Clips.IndexOf(clip);
         if (index > 0)
@@ -346,10 +392,15 @@ public partial class MergerViewModel : ObservableObject
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanEditClips))]
     public void MoveDown(MergeClipViewModel clip)
     {
         ArgumentNullException.ThrowIfNull(clip);
+
+        if (IsMerging)
+        {
+            return;
+        }
 
         var index = Clips.IndexOf(clip);
         if (index >= 0 && index < Clips.Count - 1)
@@ -367,6 +418,11 @@ public partial class MergerViewModel : ObservableObject
     {
         ArgumentNullException.ThrowIfNull(clip);
 
+        if (IsMerging)
+        {
+            return; // a drag gesture bypasses CanExecute entirely — see CanEditClips
+        }
+
         var current = Clips.IndexOf(clip);
         if (current < 0 || index < 0 || index >= Clips.Count || index == current)
         {
@@ -378,9 +434,14 @@ public partial class MergerViewModel : ObservableObject
     }
 
     /// <summary>Randomizes the order, leaving every locked row in the slot it occupies.</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanEditClips))]
     public void Shuffle()
     {
+        if (IsMerging)
+        {
+            return;
+        }
+
         if (Clips.Count < 2)
         {
             return; // nothing to permute — and Ordering would be asked to shuffle a single slot
@@ -587,13 +648,21 @@ public partial class MergerViewModel : ObservableObject
             CultureInfo.InvariantCulture,
             $"{Target.Container.ToString().ToUpperInvariant()} · {Target.Width}x{Target.Height} · {Target.FrameRate.Value:0.###} fps");
 
-    /// <summary>Both commands' enablement hangs off this flag, and ICommand does not listen to
-    /// PropertyChanged — it has to be told.</summary>
+    /// <summary>Every command's enablement hangs off this flag, and ICommand does not listen to
+    /// PropertyChanged — it has to be told. The list commands are here too: while a merge runs the
+    /// clip list is frozen (see <see cref="CanEditClips"/>), and a button that stays lit is a button
+    /// the user will press.</summary>
     partial void OnIsMergingChanged(bool value)
     {
         OnPropertyChanged(nameof(CanCancel));
+        OnPropertyChanged(nameof(CanEditClips));
         MergeCommand.NotifyCanExecuteChanged();
         CancelCommand.NotifyCanExecuteChanged();
+        AddClipsCommand.NotifyCanExecuteChanged();
+        RemoveClipCommand.NotifyCanExecuteChanged();
+        MoveUpCommand.NotifyCanExecuteChanged();
+        MoveDownCommand.NotifyCanExecuteChanged();
+        ShuffleCommand.NotifyCanExecuteChanged();
     }
 
     /// <summary>Reports on the calling thread. See the comment in <see cref="MergeAsync"/> for why

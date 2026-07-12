@@ -261,6 +261,87 @@ public class MergeServiceTests : IDisposable
         File.Delete(request.OutputPath);
     }
 
+    /// <summary>Finds the unproven merge sitting next to its destination, if the engine left one.</summary>
+    private static string[] Siblings(MergeRequest request)
+        => Directory.GetFiles(
+            Path.GetDirectoryName(request.OutputPath)!,
+            Path.GetFileNameWithoutExtension(request.OutputPath) + ".merging-*");
+
+    [Fact]
+    public async Task AFailedMerge_LeavesAnExistingOutputFileCompletelyUntouched()
+    {
+        // The default output name is the CONSTANT "merged.mp4", so merging twice in a row aims at the
+        // same path both times — and ffmpeg gets -y. If the concat wrote straight to the destination, a
+        // failed second merge would first OVERWRITE the first merge's perfectly good video and then
+        // delete the wreckage: the user ends with neither file and no idea why. So the concat writes a
+        // sibling, and only a VERIFIED merge is moved into place.
+        var request = Request(Conforming("a.mp4", seconds: 5), Conforming("b.mp4", seconds: 5));
+
+        var precious = "the user's existing merge";
+        await File.WriteAllTextAsync(request.OutputPath, precious);
+
+        // 10s in, 5s out — the truncation guard fires and the merge fails.
+        var result = await BuildVerifying(new FakeFfmpeg(), TimeSpan.FromSeconds(5)).MergeAsync(request);
+
+        Assert.False(result.IsSuccess);
+
+        // Byte for byte what it was: not overwritten, not deleted.
+        Assert.True(File.Exists(request.OutputPath));
+        Assert.Equal(precious, await File.ReadAllTextAsync(request.OutputPath));
+
+        // And the unproven merge is not left lying next to it, looking like a finished video.
+        Assert.Empty(Siblings(request));
+
+        File.Delete(request.OutputPath);
+    }
+
+    [Fact]
+    public async Task ASuccessfulMerge_MovesTheVerifiedFileIntoPlace_AndLeavesNoSibling()
+    {
+        var request = Request(Conforming("a.mp4", seconds: 5), Conforming("b.mp4", seconds: 5));
+
+        var result = await BuildVerifying(new FakeFfmpeg(), TimeSpan.FromSeconds(10)).MergeAsync(request);
+
+        Assert.True(result.IsSuccess, result.Error);
+        Assert.Equal(request.OutputPath, result.Value);
+        Assert.True(File.Exists(request.OutputPath));
+        Assert.Empty(Siblings(request));
+
+        File.Delete(request.OutputPath);
+    }
+
+    [Fact]
+    public async Task ManyClips_DoNotAccumulateRoundingIntoAFalseTruncation()
+    {
+        // The tolerance used to be a flat 1s. Every clip contributes its own rounding and those errors
+        // ACCUMULATE, so a HEALTHY many-clip merge could land more than a second short — and be
+        // declared truncated and DELETED. A false positive here is not a warning, it is data loss.
+        var clips = Enumerable.Range(0, 40).Select(i => Conforming($"c{i}.mp4", seconds: 5)).ToArray();
+        var request = Request(clips);
+
+        // 200s expected; 198.5s out — 1.5s of accumulated rounding across 40 clips, not a dropped clip
+        // (any real drop here would cost a full 5 seconds).
+        var result = await BuildVerifying(new FakeFfmpeg(), TimeSpan.FromSeconds(198.5)).MergeAsync(request);
+
+        Assert.True(result.IsSuccess, result.Error);
+        File.Delete(request.OutputPath);
+    }
+
+    [Fact]
+    public async Task ADroppedClip_IsStillCaught_EvenAcrossManyClips()
+    {
+        // The other side of the same coin: the tolerance must not grow so generous that losing a whole
+        // clip slips under it. That is the entire reason the guard exists.
+        var clips = Enumerable.Range(0, 40).Select(i => Conforming($"c{i}.mp4", seconds: 5)).ToArray();
+        var request = Request(clips);
+
+        // 200s expected, 195s out: exactly one 5-second clip is missing.
+        var result = await BuildVerifying(new FakeFfmpeg(), TimeSpan.FromSeconds(195)).MergeAsync(request);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("at least one clip was dropped", result.Error);
+    }
+
     [Fact]
     public async Task MergeAsync_FailsWhenTheMergedFileCannotBeReadBack()
     {
@@ -339,8 +420,26 @@ public class MergeServiceTests : IDisposable
 
         // The one invocation is the stream-copy concat, argument for argument — no encode ran, so
         // NormalizeArgsBuilder was never reached.
+        //
+        // Note it writes a SIBLING, not the destination: ffmpeg has -y, so writing straight to the
+        // destination would destroy whatever is already there before we know the merge is even whole.
+        // The verified file is moved into place afterwards.
         var listPath = ArgAfter(only, "-i");
-        Assert.Equal(ConcatArgsBuilder.BuildArgs(listPath, request.OutputPath, MergeContainer.Mp4), only);
+        var written = only[^1];
+        Assert.StartsWith(
+            Path.Combine(
+                Path.GetDirectoryName(request.OutputPath)!,
+                Path.GetFileNameWithoutExtension(request.OutputPath) + ".merging-"),
+            written,
+            StringComparison.Ordinal);
+        Assert.Equal(Path.GetExtension(request.OutputPath), Path.GetExtension(written)); // ffmpeg picks the muxer from it
+        Assert.NotEqual(request.OutputPath, written);
+        Assert.Equal(ConcatArgsBuilder.BuildArgs(listPath, written, MergeContainer.Mp4), only);
+
+        // …and the merge still lands where the caller asked for it.
+        Assert.Equal(request.OutputPath, result.Value);
+        Assert.True(File.Exists(request.OutputPath));
+        Assert.Empty(Siblings(request));
 
         // The conforming clips are concatenated from where they already sit.
         Assert.Equal(ConcatArgsBuilder.BuildListFile([Src("a.mp4"), Src("b.mp4")]), ffmpeg.ConcatListContent);
