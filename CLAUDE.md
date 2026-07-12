@@ -79,9 +79,21 @@ _Newest first. One entry per completed task/session._
   resource key and a nested scroller now **fail `dotnet test`** instead of failing in front of the user;
   both are mutation-proven (re-introducing each bug fails exactly its own test). Any new tool page gets
   the same pair.
-- **Verified:** Release build **0/0**; **605/605** unit tests (597 → 605, 8 new); **3/3** merge
-  integration tests still pass against the real bundled ffmpeg. **Not verified:** the user's re-check of
-  the six fixes on screen.
+- **A seventh, found after the branch was pushed — and the most instructive.** The user reported
+  *"Not a video: x.mp4 could not be read as a video"* on a perfectly good mp4. **Root cause: `ffprobe.exe`
+  was not in `assets/binaries`.** The binaries are git-ignored, M7 PR 1 added ffprobe as a **new** required
+  binary, and `fetch-binaries.ps1` had only ever been re-run **inside the worktree** — so every test and
+  every merge passed there while the user's main checkout could not probe a single file. **But the real
+  bug is the message, not the missing file:** `MergerViewModel` collapsed *"the probe failed"* and *"the
+  probe succeeded but the file has no video track"* into one notification and **discarded `probe.Error`**.
+  The analyzer was already reporting `"Could not run ffprobe: The system cannot find the file specified."`
+  — the ViewModel threw it away and blamed the user's file for a missing binary, sending them to inspect
+  their mp4. The two cases are now separate notifications, and the failure path surfaces the analyzer's
+  own reason. **A new required binary is invisible to a checkout whose git-ignored `assets/binaries` is
+  already populated — anyone pulling this branch must re-run `build/fetch-binaries.ps1`.**
+- **Verified:** Release build **0/0**; **606/606** unit tests (597 → 606, 9 new); **3/3** merge
+  integration tests pass against the real bundled ffmpeg **in the main checkout** — which they could not
+  have done before, since ffprobe was missing there. **Not verified:** the user's re-check on screen.
 - **Next:** user clicks through the six fixes; then delete the `feat/m7-merger-ui` branch + worktree.
   SDD → **v0.16** (§13 gains two new rules: *use `ui:` controls, never their plain WPF namesakes*, and
   *a `Page` must not contain its own `ScrollViewer`*; §14 gains page-load tests). Delivered via branch

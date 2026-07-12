@@ -212,15 +212,36 @@ public class MergerViewModelTests
         // whole merge later, after the user has spent minutes ordering clips.
         var h = Build();
         h.Analyzer.Returns(@"C:\good.mp4", Info());
-        h.Analyzer.Rejects(@"C:\notes.txt", "no video stream");
+        h.Analyzer.Rejects(@"C:\notes.txt", "ffprobe could not read 'notes.txt': invalid data found");
 
         await h.Vm.AddClipsAsync([@"C:\good.mp4", @"C:\notes.txt"]);
 
         Assert.Equal(new[] { "good.mp4" }, Names(h.Vm));
         var notification = Assert.Single(h.Notifications.Sent);
-        Assert.Equal("Not a video", notification.Title);
-        Assert.Equal("notes.txt could not be read as a video and was not added.", notification.Message);
+        Assert.Equal("Could not read notes.txt", notification.Title);
         Assert.Equal(NotificationSeverity.Warning, notification.Severity);
+    }
+
+    [Fact]
+    public async Task AddClipsAsync_WhenTheProbeFails_SurfacesTheAnalyzersOwnReason()
+    {
+        // The bug this pins: a FAILED probe was reported as "Not a video: x.mp4 could not be read as
+        // a video" — the analyzer's actual reason was thrown away. When ffprobe.exe was simply MISSING
+        // (it is git-ignored and fetched by build/fetch-binaries.ps1), every single file the user
+        // added produced that message, so a perfectly good .mp4 was blamed for a missing binary and
+        // the user went looking at their file. The analyzer already says exactly what went wrong —
+        // say it.
+        var h = Build();
+        h.Analyzer.Rejects(
+            @"C:\holiday.mp4",
+            "Could not run ffprobe: The system cannot find the file specified.");
+
+        await h.Vm.AddClipsAsync([@"C:\holiday.mp4"]);
+
+        Assert.Empty(h.Vm.Clips);
+        var notification = Assert.Single(h.Notifications.Sent);
+        Assert.Contains("Could not run ffprobe", notification.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be read as a video", notification.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -236,7 +257,8 @@ public class MergerViewModelTests
 
         Assert.Equal(new[] { "good.mp4" }, Names(h.Vm));
         var notification = Assert.Single(h.Notifications.Sent);
-        Assert.Equal("voiceover.m4a could not be read as a video and was not added.", notification.Message);
+        Assert.Equal("Not a video", notification.Title);
+        Assert.Equal("voiceover.m4a has no video track and was not added.", notification.Message);
         Assert.Equal(NotificationSeverity.Warning, notification.Severity);
     }
 

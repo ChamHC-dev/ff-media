@@ -342,11 +342,26 @@ public partial class MergerViewModel : ObservableObject
             }
 
             var probe = await _analyzer.AnalyzeAsync(path).ConfigureAwait(true);
-            if (!probe.IsSuccess || probe.Value is null || probe.Value.Video is null)
+
+            // A probe that FAILED and a probe that succeeded on a file with no video track are two
+            // different problems, and lumping them together actively misleads. ffprobe.exe is
+            // git-ignored and fetched by build/fetch-binaries.ps1 — when it is missing, EVERY file
+            // fails to probe, and reporting that as "not a video" blames the user's perfectly good
+            // .mp4 for a missing binary. The analyzer already says what actually went wrong; say it.
+            if (!probe.IsSuccess || probe.Value is null)
+            {
+                _notifications.Notify(new Notification(
+                    $"Could not read {Path.GetFileName(path)}",
+                    probe.Error ?? "The file could not be analyzed.",
+                    NotificationSeverity.Warning));
+                continue;
+            }
+
+            if (probe.Value.Video is null)
             {
                 _notifications.Notify(new Notification(
                     "Not a video",
-                    $"{Path.GetFileName(path)} could not be read as a video and was not added.",
+                    $"{Path.GetFileName(path)} has no video track and was not added.",
                     NotificationSeverity.Warning));
                 continue;
             }
