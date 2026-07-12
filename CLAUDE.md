@@ -29,9 +29,101 @@ milestones. Read it before making design decisions.
 
 ---
 
+---
+
+## ▶️ RESUME HERE (next session)
+
+**The work queued up and ready to execute: M8 — the GIF Maker.**
+
+- **Plan:** [`docs/superpowers/plans/2026-07-12-m8-gif-maker.md`](docs/superpowers/plans/2026-07-12-m8-gif-maker.md)
+  — 8 TDD tasks, complete with code. **It opens with a "🚦 START HERE" section written for an agent with
+  zero context. Read that first.**
+- **Spec (the *what*):** [`docs/superpowers/specs/2026-07-12-gif-maker-design.md`](docs/superpowers/specs/2026-07-12-gif-maker-design.md)
+- **How to execute:** invoke `superpowers:subagent-driven-development` with the plan. (That skill keeps a
+  ledger at `.superpowers/sdd/progress.md` — **check it before dispatching anything**; if it lists tasks
+  as complete, they are done, and you resume at the first that is not.)
+- **Branch:** `feat/m8-gif-maker`. Branch off `main` **if PR #26 (the spec) is merged** — check whether
+  `docs/superpowers/specs/2026-07-12-gif-maker-design.md` exists on `main`; if it does not, branch off
+  `docs/gif-maker-design` instead, so the spec is present.
+
+**Open PR at hand-off:** **#26** — `docs/gif-maker-design`, carrying **both the M8 spec and this plan**.
+It should be merged before (or as) the work starts, so the spec and plan live on `main`.
+*(PR #25, the delta-package fix, was merged — `main` @ `628bfcc`. `release.yml` now runs
+`vpk download github` before packing, so the **next** release will be the first to ship a delta:
+~19 MB instead of ~190 MB. That has not been exercised by a real tag yet; the workflow raises a CI
+**warning** if no delta is produced, so watch for it.)*
+
+**Repo state at hand-off:** `main` green — Release build **0 warnings / 0 errors**, **642/642** unit
+tests, **4/4** merge integration tests. Latest release **v1.1.1** (live; notes written).
+
+**Still not verified by a human, from earlier work** — worth a click-through when convenient: the merger
+page's clip-list **column alignment** (`Grid.IsSharedSizeScope` is the right mechanism, but alignment is
+a *pixel* claim only eyes settle), the **pin toggle**, and whether the new **plain-English tooltips**
+actually land for a casual reader.
+
+---
+
 ## 📓 Progress Log
 
 _Newest first. One entry per completed task/session._
+
+### 2026-07-12 — M8 GIF Maker: implementation plan (no code)
+
+- **Done:** wrote [`docs/superpowers/plans/2026-07-12-m8-gif-maker.md`](docs/superpowers/plans/2026-07-12-m8-gif-maker.md)
+  — **8 TDD tasks**, each with the actual code and the actual test bodies: (1) promote `Resolution` →
+  `FFMedia.Media` and `TrimParsing.TryParse` → `FFMedia.Core` (a tool must never reference another tool);
+  (2) `GifBounds`; (3) `GifArgsBuilder` (the two passes); (4) the calibrated size estimate; (5)
+  `GifService` (preflight → two passes → **re-probe the output** → cleanup on every path); (6)
+  `GifMakerViewModel`; (7) the page + `ITool` + DI + tooltips; (8) a real-ffmpeg integration test + docs.
+- **Written to be picked up cold.** The plan opens with a **🚦 START HERE** section — repo state, the
+  standing rules, the verification gate, the hard-won lessons (ffmpeg's exit code cannot be trusted; a
+  `Style` with no `BasedOn` silently discards WPF-UI's theming; a `Page` must not nest a `ScrollViewer`),
+  and every exact signature it will build against. `CLAUDE.md` now also has a **▶️ RESUME HERE** section
+  at the top pointing straight at it.
+- **Facts resolved so the next agent inherits none of my guesses:** `JsonStore<T>` lives in
+  `FFMedia.Core.Persistence` (**not** `Storage`) and its `Load` takes a **factory**, not a parameterless
+  call — I had both wrong in the first draft and corrected them against `SpeedProfileStore` before
+  committing. Also pre-verified: `SymbolRegular.Gif24` exists, `palettegen`/`paletteuse` exist, `-to` is
+  absolute, and the seek is frame-accurate.
+- **Verified:** nothing to build — **documentation only, no code touched**.
+- **Next:** execute the plan (`superpowers:subagent-driven-development`). Delivered via branch
+  `docs/gif-maker-design` → PR #26 (the plan rides with the spec).
+
+### 2026-07-12 — M8 GIF Maker: design (spec only, no code)
+
+- **Done:** brainstormed and specced FFMedia's **third tool**, `FFMedia.Tools.GifMaker` →
+  `docs/superpowers/specs/2026-07-12-gif-maker-design.md`. One video → one GIF, with **start / end /
+  size / frame rate** and nothing else in v1. A **single-item editor with a live estimated size**, not a
+  queue: making a GIF is iterative — you tune until it is small enough — so the feedback loop matters
+  more than throughput.
+- **The decision that determines whether it looks good:** **always two-pass**
+  `palettegen` + `paletteuse`. The obvious `ffmpeg -i in.mp4 out.gif` quantizes to a *generic*
+  256-colour palette and produces visibly banded, dirty output; the two-pass route builds a palette from
+  the clip's **own** colours. Verified present in the bundled ffmpeg 8.1, and it costs ~3× of a fraction
+  of a second (**0.47 s vs 0.15 s** on a 3 s clip) — so the bad route is simply not offered.
+- **Measured, and it contradicted my own instinct:** two passes is **not automatically smaller**
+  (0.57 MB vs 0.38 MB in the same test) — the dithering that buys smooth gradients also adds noise that
+  compresses *worse*. Quality vs size is a real trade-off here, not a free win. v1 takes the quality
+  side; a dither preset is the first deferred follow-up.
+- **The spec's own claims, verified rather than asserted.** I had written that `-ss` before `-i` "seeks
+  to the nearest keyframe" and left `-to` unstated. Both are widely mis-stated and both were wrong/vague,
+  so I tested them: **`-to` is ABSOLUTE** on the source timeline, not a duration from the seek point
+  (`-ss 2 -to 5` → exactly **3.0 s**), and **input seeking is frame-accurate, not keyframe-snapped**
+  (30 frames at 10 fps, with keyframes 5 s apart). So the builder passes Start/End straight through and
+  needs no `-accurate_seek`. Corrected before the spec was committed.
+- **Reuses the rules the last two tools earned:** size and frame rate are **capped at the source** (the
+  `TargetBounds` rule — a GIF wider or faster than its source contains no new information); **height is
+  derived from the source aspect**, never a second box (the `1920 × 102` hole the merger shipped); the
+  finished GIF is **re-probed before being called a success** (ffmpeg's exit code is exactly what cannot
+  be trusted); size is estimated as a **range** calibrated from the user's own past GIFs (`gif-size.json`
+  — the `SpeedProfile` pattern for the same class of unknowable).
+- **Two promotions, because a tool must never reference another tool:** `Resolution` →
+  `FFMedia.Media`, `TrimParsing` → `FFMedia.Core`. Both pure moves.
+- **Verified:** `palettegen`/`paletteuse` exist in the bundled ffmpeg; `Gif24` **exists** in
+  `SymbolRegular` (checked — the shell degrades an unparseable icon name to `Apps24` *silently*); the
+  `-ss`/`-to` semantics above. No build/tests run — **documentation only, no code touched**.
+- **Next:** user reviews the spec → `writing-plans` for the implementation. SDD → **v0.23** (§17 gains
+  M8 + Changelog). Delivered via branch `docs/gif-maker-design` → PR.
 
 ### 2026-07-12 — Delta updates were never actually being built (four releases shipped full-only)
 
