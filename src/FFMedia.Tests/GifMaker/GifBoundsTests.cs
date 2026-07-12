@@ -80,6 +80,27 @@ public class GifBoundsTests
     {
         var audioOnly = new MediaInfo(TimeSpan.FromSeconds(30), "mp3", null, null);
 
-        Assert.Empty(GifBounds.From(audioOnly).Sizes);
+        var bounds = GifBounds.From(audioOnly);
+
+        Assert.Empty(bounds.Sizes);
+        Assert.Empty(bounds.FrameRates);
+    }
+
+    [Fact]
+    public void From_ANonStandardFrameRate_HeadsTheListAtItsOwnRate()
+    {
+        // 18 fps sits BETWEEN two standard steps (20 and 15) and is not itself in StandardRates. An
+        // implementation that filters the standard list instead of prepending the source would silently
+        // drop the source's own rate here -- every other test in this file used a rate that was already
+        // standard, so none of them could catch that.
+        var bounds = GifBounds.From(Source(fps: 18));
+
+        Assert.Equal(new FrameRate(18, 1), bounds.FrameRates[0]);
+        Assert.DoesNotContain(new FrameRate(20, 1), bounds.FrameRates);
+        Assert.DoesNotContain(new FrameRate(24, 1), bounds.FrameRates);
+        Assert.DoesNotContain(new FrameRate(30, 1), bounds.FrameRates);
+        Assert.Contains(new FrameRate(15, 1), bounds.FrameRates);
+        Assert.Contains(new FrameRate(12, 1), bounds.FrameRates);
+        Assert.Contains(new FrameRate(10, 1), bounds.FrameRates);
     }
 }
