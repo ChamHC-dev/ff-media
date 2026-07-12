@@ -1,0 +1,208 @@
+using FFMedia.Core.Results;
+using FFMedia.Media;
+using FFMedia.Tools.GifMaker.Models;
+using FFMedia.Tools.GifMaker.Services;
+using Xunit;
+
+namespace FFMedia.Tests.GifMaker;
+
+public class GifServiceTests : IDisposable
+{
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "ffmedia-gif-tests-" + Guid.NewGuid().ToString("N"));
+
+    public GifServiceTests() => Directory.CreateDirectory(_dir);
+
+    public void Dispose()
+    {
+        try
+        {
+            Directory.Delete(_dir, recursive: true);
+        }
+        catch (IOException)
+        {
+            // a test that leaked a handle should not also fail the run on cleanup
+        }
+    }
+
+    /// <summary>Writes a plausible-looking output file whenever the RENDER pass runs, so the service has
+    /// something to verify. Scriptable per pass.</summary>
+    private sealed class FakeFfmpeg : IFfmpegRunner
+    {
+        private readonly string _outputPath;
+
+        public FakeFfmpeg(string outputPath) => _outputPath = outputPath;
+
+        public List<IReadOnlyList<string>> Calls { get; } = new();
+
+        public Func<int, Result> Behavior { get; set; } = _ => Result.Success();
+
+        /// <summary>Bytes written for the render pass. 0 = write nothing (simulating a failed render).</summary>
+        public int OutputBytes { get; set; } = 1024;
+
+        public Task<Result> RunAsync(
+            IReadOnlyList<string> arguments, IProgress<FfmpegProgress>? progress = null, CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+            Calls.Add(arguments);
+
+            var isRender = arguments.Contains("-lavfi");
+            if (isRender && OutputBytes > 0)
+            {
+                File.WriteAllBytes(_outputPath, new byte[OutputBytes]);
+            }
+            else if (!isRender)
+            {
+                File.WriteAllBytes(arguments[^1], new byte[64]); // the palette
+            }
+
+            return Task.FromResult(Behavior(Calls.Count));
+        }
+    }
+
+    private sealed class FakeAnalyzer : IMediaAnalyzer
+    {
+        public Func<string, Result<MediaInfo>> Behavior { get; set; } =
+            _ => Result<MediaInfo>.Success(new MediaInfo(
+                TimeSpan.FromSeconds(3), "gif",
+                new VideoStreamInfo(480, 270, new FrameRate(15, 1), "gif", "bgra", 0), null));
+
+        public Task<Result<MediaInfo>> AnalyzeAsync(string filePath, CancellationToken ct = default)
+            => Task.FromResult(Behavior(filePath));
+    }
+
+    private sealed class FakeStore : IGifSizeProfileStore
+    {
+        public GifSizeProfile Profile { get; set; } = new();
+
+        public GifSizeProfile Load() => Profile;
+
+        public void Save(GifSizeProfile profile) => Profile = profile;
+    }
+
+    private (GifService Service, FakeFfmpeg Ffmpeg, FakeAnalyzer Analyzer, FakeStore Store, GifRequest Request) Build()
+    {
+        var output = Path.Combine(_dir, "out.gif");
+        var ffmpeg = new FakeFfmpeg(output);
+        var analyzer = new FakeAnalyzer();
+        var store = new FakeStore();
+        var service = new GifService(ffmpeg, analyzer, store, _dir);
+        var request = new GifRequest(
+            Path.Combine(_dir, "src.mp4"), TimeSpan.Zero, TimeSpan.FromSeconds(3),
+            new Resolution(480, 270), new FrameRate(15, 1), output);
+        File.WriteAllBytes(request.SourcePath, new byte[128]);
+
+        return (service, ffmpeg, analyzer, store, request);
+    }
+
+    [Fact]
+    public async Task CreateAsync_RunsBothPasses_PaletteThenRender()
+    {
+        var (service, ffmpeg, _, _, request) = Build();
+
+        var result = await service.CreateAsync(request);
+
+        Assert.True(result.IsSuccess, result.Error);
+        Assert.Equal(2, ffmpeg.Calls.Count);
+        Assert.Contains("palettegen", string.Join(" ", ffmpeg.Calls[0]), StringComparison.Ordinal);
+        Assert.Contains("paletteuse", string.Join(" ", ffmpeg.Calls[1]), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CreateAsync_DeletesTheTempPalette_OnSuccess()
+    {
+        var (service, _, _, _, request) = Build();
+
+        await service.CreateAsync(request);
+
+        Assert.Empty(Directory.GetFiles(_dir, "*.png"));
+    }
+
+    [Fact]
+    public async Task CreateAsync_DeletesTheTempPalette_WhenTheRenderFails()
+    {
+        var (service, ffmpeg, _, _, request) = Build();
+        ffmpeg.Behavior = call => call == 2 ? Result.Failure("Error while opening encoder") : Result.Success();
+
+        var result = await service.CreateAsync(request);
+
+        Assert.False(result.IsSuccess);
+        Assert.Empty(Directory.GetFiles(_dir, "*.png"));
+    }
+
+    [Fact]
+    public async Task CreateAsync_WhenFfmpegLies_TheOutputIsProbedAndTheCorruptFileIsDeleted()
+    {
+        // THE RULE: ffmpeg's exit code is exactly what cannot be trusted -- its concat demuxer exits 0
+        // having silently dropped segments. A GIF that exits 0 but is not a GIF must NOT be handed over
+        // as a success, and must not be left on disk for the user to find and believe.
+        var (service, _, analyzer, _, request) = Build();
+        analyzer.Behavior = _ => Result<MediaInfo>.Failure("Invalid data found when processing input");
+
+        var result = await service.CreateAsync(request);
+
+        Assert.False(result.IsSuccess);
+        Assert.False(File.Exists(request.OutputPath), "a GIF that failed verification must be deleted");
+    }
+
+    [Fact]
+    public async Task CreateAsync_WhenTheOutputIsEmpty_ItFails()
+    {
+        var (service, ffmpeg, _, _, request) = Build();
+        ffmpeg.OutputBytes = 0; // ffmpeg "succeeded" but wrote nothing
+
+        var result = await service.CreateAsync(request);
+
+        Assert.False(result.IsSuccess);
+    }
+
+    [Fact]
+    public async Task CreateAsync_RecordsTheActualSize_SoTheEstimateLearns()
+    {
+        var (service, _, _, store, request) = Build();
+        var before = store.Profile.SampleCount;
+
+        await service.CreateAsync(request);
+
+        Assert.Equal(before + 1, store.Profile.SampleCount);
+    }
+
+    [Fact]
+    public async Task CreateAsync_RejectsARangeOutsideTheSource_BeforeRunningFfmpeg()
+    {
+        var (service, ffmpeg, analyzer, _, _) = Build();
+        analyzer.Behavior = _ => Result<MediaInfo>.Success(new MediaInfo(
+            TimeSpan.FromSeconds(5), "mov,mp4,m4a",
+            new VideoStreamInfo(1920, 1080, new FrameRate(30, 1), "h264", "yuv420p", 0), null));
+
+        var request = new GifRequest(
+            Path.Combine(_dir, "src.mp4"), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(9),
+            new Resolution(480, 270), new FrameRate(15, 1), Path.Combine(_dir, "out.gif"));
+
+        var result = await service.CreateAsync(request);
+
+        Assert.False(result.IsSuccess);
+        Assert.Empty(ffmpeg.Calls); // rejected at preflight -- do not spend an encode to find this out
+    }
+
+    [Fact]
+    public async Task CreateAsync_WhenCancelled_LeavesNoPaletteAndNoHalfWrittenGif()
+    {
+        var (service, ffmpeg, _, _, request) = Build();
+        using var cts = new CancellationTokenSource();
+        ffmpeg.Behavior = call =>
+        {
+            if (call == 1)
+            {
+                cts.Cancel();
+            }
+
+            return Result.Success();
+        };
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => service.CreateAsync(request, progress: null, cts.Token));
+
+        Assert.Empty(Directory.GetFiles(_dir, "*.png"));
+        Assert.False(File.Exists(request.OutputPath));
+    }
+}
