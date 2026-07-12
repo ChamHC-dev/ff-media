@@ -33,6 +33,36 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-12 — Delta updates were never actually being built (four releases shipped full-only)
+
+- **The bug worth remembering — "the workflow passed" is not evidence the thing was produced.** SDD has
+  claimed "installer + **delta** auto-update" since v0.9. The machinery is real. **But no release has
+  ever shipped a delta.** `vpk pack` builds one by diffing against the **previous release's `.nupkg`**,
+  and if that file is not in the output directory it emits a **full package only — with no error and no
+  warning**. A CI runner starts from an empty checkout, so there was never anything to diff against:
+  **v1.0.0 → v1.1.1 all shipped full-only**, and every update was a **~190 MB download** — including
+  v1.1.1, which changed nothing but tooltip strings.
+- **How it was found:** by *reading the published manifest* after tagging v1.1.1 (`"Type":"Full"`, and
+  nothing else) rather than stopping at the green workflow. Pack succeeds either way. That is precisely
+  why it survived four releases — there was no failure to notice, only an absence, and nobody was
+  looking for an absence.
+- **Fix:** `release.yml` now runs **`vpk download github` before `vpk pack`** (Velopack's documented
+  flow), plus a step that **asserts a `*-delta.nupkg` exists** and raises a CI warning if it does not.
+  The assertion is the real fix: the original defect was trusting that a successful command had done
+  the thing it was supposed to do. `continue-on-error` on the download, because the first release on a
+  channel legitimately has nothing to diff against.
+- **Proven before merging, not after.** `vpk` installs locally, so this did not have to wait for a real
+  tag to be believed: downloaded v1.1.1, packed a hypothetical 1.1.2, and Velopack logged
+  `Building delta 1.1.1 -> 1.1.2`. **190.8 MB full → 18.6 MB delta (≈90 % smaller)**, with the manifest
+  now advertising both a `Full` and a `Delta` asset.
+- **Also done:** rewrote the **v1.1.0 and v1.1.1 GitHub release descriptions** to match the user-facing
+  style of v1.0.0/v1.0.1 (feature/fix sections, install + update instructions, bundled-versions footer).
+- **Verified:** the delta build, locally and end-to-end. `release.yml` itself is only proven by the
+  **next** tag — the CI path cannot be exercised without one, and the new assertion step exists exactly
+  so that a silent regression there becomes loud.
+- **Next:** user reviews the PR; the next release will be the first to actually ship a delta.
+  SDD → **v0.22** (§15). Delivered via branch `fix/delta-updates` → PR.
+
 ### 2026-07-12 — Plain-English tooltips on every parameter (Downloader, Merger, Settings)
 
 - **The ask:** casual users cannot understand the parameters. True — they are the vocabulary of video
