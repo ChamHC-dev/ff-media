@@ -107,4 +107,85 @@ public class MergeTargetClampTests
 
         Assert.Equal(target, target.ClampTo(TargetBounds.Empty));
     }
+
+    // The four tests below force LargestNotExceeding's "eligible.Count == 0" branch: every allowed
+    // value is built strictly ABOVE the target's current value, so nothing qualifies for "largest ≤
+    // current" and the fallback ("take the smallest") is the only thing that can produce the asserted
+    // result. Before these existed, deleting `allowed.MinBy(weight)` and returning `eligible.MaxBy
+    // (weight)!` unconditionally left all other tests green — half the documented rule was unpinned.
+    //
+    // TargetBounds is a plain record with a public ctor, so we build a ladder directly instead of
+    // going through TargetBounds.From (which always seeds the ladder with the current/derived value,
+    // making "nothing qualifies" unreachable from real derivation).
+
+    [Fact]
+    public void ClampTo_AllAllowedResolutionsExceedTheCurrentOne_FallsBackToTheSmallest()
+    {
+        // Reference-type weight (Resolution/PixelCount). Every rung is bigger than the 640x360
+        // override, so eligible is empty and the rule's second half must pick the smallest rung.
+        var bounds = new TargetBounds(
+            [new Resolution(1920, 1080), new Resolution(1280, 720)],
+            [MergeTarget.Default.FrameRate],
+            [MergeTarget.Default.AudioSampleRate],
+            [MergeTarget.Default.AudioChannels]);
+        var target = MergeTarget.Default with { Width = 640, Height = 360 };
+
+        var clamped = target.ClampTo(bounds);
+
+        Assert.Equal(1280, clamped.Width);
+        Assert.Equal(720, clamped.Height);
+    }
+
+    [Fact]
+    public void ClampTo_AllAllowedFrameRatesExceedTheCurrentOne_FallsBackToTheSmallest()
+    {
+        // Value-type weight (FrameRate wraps a struct). This is the branch the brief warns about:
+        // FirstOrDefault() on a value-type sequence yields default(FrameRate), not null, so a
+        // `FirstOrDefault() ?? MinBy(...)` rewrite would never fall through to MinBy here — it would
+        // silently return default(FrameRate) (0/1) instead. Only asserting the true smallest rung
+        // (24 fps, not 0 fps) would catch that regression.
+        var bounds = new TargetBounds(
+            [new Resolution(MergeTarget.Default.Width, MergeTarget.Default.Height)],
+            [new FrameRate(60, 1), new FrameRate(24, 1)],
+            [MergeTarget.Default.AudioSampleRate],
+            [MergeTarget.Default.AudioChannels]);
+        var target = MergeTarget.Default with { FrameRate = new FrameRate(15, 1) };
+
+        var clamped = target.ClampTo(bounds);
+
+        Assert.Equal(new FrameRate(24, 1), clamped.FrameRate);
+    }
+
+    [Fact]
+    public void ClampTo_AllAllowedSampleRatesExceedTheCurrentOne_FallsBackToTheSmallest()
+    {
+        // Value-type weight (plain int). Same FirstOrDefault trap as frame rate: default(int) is 0,
+        // a value nothing here would otherwise produce, so a broken fallback is unmistakable.
+        var bounds = new TargetBounds(
+            [new Resolution(MergeTarget.Default.Width, MergeTarget.Default.Height)],
+            [MergeTarget.Default.FrameRate],
+            [96_000, 48_000],
+            [MergeTarget.Default.AudioChannels]);
+        var target = MergeTarget.Default with { AudioSampleRate = 22_050 };
+
+        var clamped = target.ClampTo(bounds);
+
+        Assert.Equal(48_000, clamped.AudioSampleRate);
+    }
+
+    [Fact]
+    public void ClampTo_AllAllowedChannelCountsExceedTheCurrentOne_FallsBackToTheSmallest()
+    {
+        // Value-type weight (plain int), the channels twin of the sample-rate case above.
+        var bounds = new TargetBounds(
+            [new Resolution(MergeTarget.Default.Width, MergeTarget.Default.Height)],
+            [MergeTarget.Default.FrameRate],
+            [MergeTarget.Default.AudioSampleRate],
+            [8, 6]);
+        var target = MergeTarget.Default with { AudioChannels = 1 };
+
+        var clamped = target.ClampTo(bounds);
+
+        Assert.Equal(6, clamped.AudioChannels);
+    }
 }
