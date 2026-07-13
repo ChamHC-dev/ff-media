@@ -9,6 +9,10 @@ using FFMedia.Core.Presets;
 using FFMedia.Core.Results;
 using FFMedia.Core.Settings;
 using FFMedia.Media;
+using FFMedia.Tools.GifMaker.Models;
+using FFMedia.Tools.GifMaker.Services;
+using FFMedia.Tools.GifMaker.ViewModels;
+using FFMedia.Tools.GifMaker.Views;
 using FFMedia.Tools.VideoMerger.Models;
 using FFMedia.Tools.VideoMerger.Services;
 using FFMedia.Tools.VideoMerger.ViewModels;
@@ -58,6 +62,14 @@ public class TooltipCoverageTests
     {
         AssertEveryInputHasATooltip(() => new MergerPage(new MergerViewModel(
             new StubAnalyzer(), new StubMergeService(), new StubSpeedStore(),
+            new StubSettings(), new StubHistory(), new StubNotifications())));
+    }
+
+    [Fact]
+    public void EveryInputOnTheGifMakerPage_ExplainsItself()
+    {
+        AssertEveryInputHasATooltip(() => new GifMakerPage(new GifMakerViewModel(
+            new StubAnalyzer(), new StubGifService(), new StubGifSizeProfileStore(),
             new StubSettings(), new StubHistory(), new StubNotifications())));
     }
 
@@ -206,6 +218,22 @@ public class TooltipCoverageTests
         public Task<Result<string>> MergeAsync(
             MergeRequest request, IProgress<MergeProgress>? progress = null, CancellationToken ct = default)
             => Task.FromResult(Result<string>.Failure("stub"));
+    }
+
+    private sealed class StubGifService : IGifService
+    {
+        public Task<Result<string>> CreateAsync(
+            GifRequest request, IProgress<GifProgress>? progress = null, CancellationToken ct = default)
+            => Task.FromResult(Result<string>.Failure("stub"));
+    }
+
+    private sealed class StubGifSizeProfileStore : IGifSizeProfileStore
+    {
+        public GifSizeProfile Load() => new();
+
+        public void Save(GifSizeProfile profile)
+        {
+        }
     }
 
     private sealed class StubSpeedStore : ISpeedProfileStore

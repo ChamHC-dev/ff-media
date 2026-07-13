@@ -8,4 +8,7 @@ public enum HistorySource
 
     /// <summary>A local merge (Video Merger).</summary>
     Merge,
+
+    /// <summary>A GIF made from a local video (GIF Maker).</summary>
+    Gif,
 }

@@ -2,6 +2,7 @@ using System;
 using FFMedia.Tools.YouTubeDownloader.Models;
 using FFMedia.Tools.YouTubeDownloader.Services;
 using Xunit;
+using CoreTrimParsing = FFMedia.Core.Media.TrimParsing;
 
 namespace FFMedia.Tests.YouTubeDownloader;
 
@@ -14,7 +15,7 @@ public class TrimParsingTests
     [InlineData("0", 0)]
     public void TryParse_ParsesSecondsAndClockFormats(string text, int expectedSeconds)
     {
-        Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), TrimParsing.TryParse(text));
+        Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), CoreTrimParsing.TryParse(text));
     }
 
     [Theory]
@@ -30,13 +31,13 @@ public class TrimParsingTests
     [InlineData("999999999:00:00")]          // hours magnitude overflows TimeSpan
     public void TryParse_BlankOrInvalid_ReturnsNull(string? text)
     {
-        Assert.Null(TrimParsing.TryParse(text));
+        Assert.Null(CoreTrimParsing.TryParse(text));
     }
 
     [Fact]
     public void TryParse_FractionalSeconds_ParsesWithInvariantCulture()
     {
-        Assert.Equal(TimeSpan.FromSeconds(1.5), TrimParsing.TryParse("1.5"));
+        Assert.Equal(TimeSpan.FromSeconds(1.5), CoreTrimParsing.TryParse("1.5"));
     }
 
     [Fact]

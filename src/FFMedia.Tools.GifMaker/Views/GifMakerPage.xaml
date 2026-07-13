@@ -1,0 +1,130 @@
+<Page x:Class="FFMedia.Tools.GifMaker.Views.GifMakerPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      AllowDrop="True"
+      DragOver="OnDragOverPage"
+      Drop="OnFileDropped"
+      Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+      ToolTipService.ShowDuration="30000" ToolTipService.InitialShowDelay="400">
+    <!-- The Foreground above is load-bearing (SDD §13): WPF's Frame isolates property-value
+         inheritance, so the window's foreground never reaches page content and every plain TextBlock
+         here would fall back to WPF's default BLACK — invisible in dark mode. -->
+    <Page.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    </Page.Resources>
+
+    <!-- No ScrollViewer here, deliberately — and no other page in the app has one either. WPF-UI's
+         NavigationViewContentPresenter already wraps every page in one. A second, nested ScrollViewer
+         is handed unbounded height by the outer one, so it can never scroll (ScrollableHeight = 0) —
+         yet WPF's ScrollViewer marks mouse-wheel events HANDLED even when it cannot move. It therefore
+         swallows every wheel tick and the shell's scroller, which does have room to scroll, never sees
+         them. Shipped once already from MergerPage; not repeating it here. -->
+    <StackPanel Margin="24" MaxWidth="900" HorizontalAlignment="Left">
+
+        <TextBlock Text="GIF Maker" FontSize="24" FontWeight="SemiBold" />
+        <TextBlock Text="Turn part of a video into a GIF."
+                   Opacity="0.8" Margin="0,4,0,16" />
+
+        <!-- 1. Source -->
+        <TextBlock Text="Source" FontSize="16" FontWeight="SemiBold" />
+        <StackPanel Orientation="Horizontal" Margin="0,8,0,8">
+            <ui:Button Content="Choose video…" Icon="{ui:SymbolIcon Video24}" Click="OnPickVideo"
+                       IsEnabled="{Binding CanEditParameters}" />
+            <TextBlock Text="…or drop a video file anywhere on this page."
+                       VerticalAlignment="Center" Margin="12,0,0,0" Opacity="0.7" />
+        </StackPanel>
+        <TextBlock Text="{Binding SourceSummary}" FontWeight="SemiBold" Margin="0,0,0,16"
+                   Visibility="{Binding SourceLoaded, Converter={StaticResource BoolToVisibility}}" />
+
+        <!-- Everything below needs a loaded source — there is nothing yet to bound Size/Frame rate
+             against, and no range to trim. -->
+        <StackPanel Visibility="{Binding SourceLoaded, Converter={StaticResource BoolToVisibility}}">
+
+            <!-- 2. Range -->
+            <StackPanel IsEnabled="{Binding CanEditParameters}">
+                <TextBlock Text="Range" FontSize="16" FontWeight="SemiBold" />
+                <UniformGrid Columns="2" Margin="0,8,0,4">
+                    <StackPanel Margin="0,0,8,0"
+                                ToolTip="Which part of the video to turn into a GIF. Type times like 1:30, or 0:05. GIF size grows directly with length, so this is the biggest lever you have.">
+                        <TextBlock Text="Start" />
+                        <ui:TextBox Text="{Binding StartText, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+                    <StackPanel
+                                ToolTip="Which part of the video to turn into a GIF. Type times like 1:30, or 0:05. GIF size grows directly with length, so this is the biggest lever you have.">
+                        <TextBlock Text="End" />
+                        <ui:TextBox Text="{Binding EndText, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+                </UniformGrid>
+                <TextBlock Text="{Binding RangeHint}" Opacity="0.8" TextWrapping="Wrap" FontSize="12"
+                           Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                           Margin="0,0,0,16" />
+            </StackPanel>
+
+            <!-- 3. Output -->
+            <StackPanel IsEnabled="{Binding CanEditParameters}">
+                <TextBlock Text="Output" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8" />
+                <UniformGrid Columns="2" Margin="0,0,0,8">
+                    <StackPanel Margin="0,0,8,8"
+                                ToolTip="How big the GIF is. Smaller means a much smaller file — GIF sizes grow fast. Only sizes your video can actually fill are offered; a bigger GIF than the source would just invent detail.">
+                        <TextBlock Text="Size" />
+                        <ComboBox ItemsSource="{Binding Bounds.Sizes}" SelectedItem="{Binding SelectedSize}" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,0,8"
+                                ToolTip="How many frames per second the GIF plays. 15 is smooth enough for most things and half the size of 30. Only rates your video can supply are offered — asking for more would just duplicate frames.">
+                        <TextBlock Text="Frame rate" />
+                        <!-- FrameRate is a record struct with no ToString override, so binding raw
+                             values through DisplayMemberPath would print "FrameRate { Numerator = ... }".
+                             An ItemTemplate reading its own Value (fps as a double) avoids needing a
+                             wrapper type in the ViewModel just for display, unlike MergerViewModel's
+                             FrameRateOption — GifBounds.FrameRates has no such wrapper. -->
+                        <ComboBox ItemsSource="{Binding Bounds.FrameRates}" SelectedItem="{Binding SelectedFrameRate}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Value, StringFormat={}{0:0.###} fps}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </StackPanel>
+                </UniformGrid>
+            </StackPanel>
+
+            <!-- 4. Estimate -->
+            <TextBlock Text="{Binding EstimateText}" FontWeight="SemiBold" Margin="0,0,0,4"
+                       ToolTip="The estimated finished file size, as a range calibrated from GIFs you have made before. It gets more accurate the more you use this tool." />
+            <TextBlock Text="{Binding SizeWarningMessage}" TextWrapping="Wrap" FontSize="12" Margin="0,0,0,12"
+                       Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                       Visibility="{Binding ShowSizeWarning, Converter={StaticResource BoolToVisibility}}" />
+
+            <!-- 5. File name + folder -->
+            <TextBlock Text="File name" />
+            <ui:TextBox Text="{Binding OutputFileName, UpdateSourceTrigger=LostFocus}" Margin="0,0,0,8"
+                        ToolTip="What to call the GIF. If a file of this name is already there, it is replaced." />
+
+            <TextBlock Text="Folder" />
+            <Grid Margin="0,0,0,16"
+                  ToolTip="Where the GIF is saved. Starts from the default folder in Settings.">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <ui:TextBox Grid.Column="0" Text="{Binding OutputFolder, UpdateSourceTrigger=LostFocus}" />
+                <ui:Button Grid.Column="1" Content="Browse…" Icon="{ui:SymbolIcon FolderOpen24}"
+                           Margin="8,0,0,0" Click="OnPickFolder"
+                           ToolTip="Choose the folder to save the GIF in." />
+            </Grid>
+
+            <!-- 6. Actions -->
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                <ui:Button Content="Create GIF" Appearance="Primary" Icon="{ui:SymbolIcon Gif24}"
+                           Command="{Binding CreateCommand}" Margin="0,0,8,0"
+                           ToolTip="Build the GIF with the settings above. Needs a valid range and a file name." />
+                <ui:Button Content="Cancel" Command="{Binding CancelCommand}"
+                           ToolTip="Stop the render. Nothing half-finished is left behind." />
+            </StackPanel>
+            <ProgressBar Value="{Binding Percent, Mode=OneWay}" Maximum="100" Height="6" />
+            <TextBlock Text="{Binding StatusMessage}" Opacity="0.8" Margin="0,6,0,0" TextWrapping="Wrap" />
+
+        </StackPanel>
+    </StackPanel>
+</Page>
