@@ -34,13 +34,17 @@ public class PreviewProxyTests : IDisposable
         {
             ct.ThrowIfCancellationRequested();
             Calls.Add(arguments);
-            var result = Behavior();
-            if (result.IsSuccess && OutputBytes > 0)
+
+            // Written BEFORE Behavior() runs: real ffmpeg can write partial/whole output and still
+            // exit non-zero (or get cancelled after writing). Writing only on success made the
+            // "no half-written proxy" test untriggerable -- there was never a file for the service's
+            // cleanup to actually delete, so deleting that cleanup left the test green.
+            if (OutputBytes > 0)
             {
                 File.WriteAllBytes(arguments[^1], new byte[OutputBytes]);
             }
 
-            return Task.FromResult(result);
+            return Task.FromResult(Behavior());
         }
     }
 
@@ -54,11 +58,24 @@ public class PreviewProxyTests : IDisposable
         // GIF would be cut somewhere other than where the user saw. Rescale only. Never re-time.
         var args = PreviewProxyArgs.Build(@"C:\in.webm", Info(), @"C:\tmp\p.mp4");
 
-        Assert.DoesNotContain("-r", args);        // no frame-rate change
-        Assert.DoesNotContain("-ss", args);       // no seek
-        Assert.DoesNotContain("-t", args);        // no duration cap
+        Assert.DoesNotContain("-r", args);          // no frame-rate change
+        Assert.DoesNotContain("-r:v", args);
+        Assert.DoesNotContain("-ss", args);         // no seek
+        Assert.DoesNotContain("-t", args);          // no duration cap
         Assert.DoesNotContain("-to", args);
         Assert.DoesNotContain("-vsync", args);
+        Assert.DoesNotContain("-fps_mode", args);   // the modern replacement for -vsync
+        Assert.DoesNotContain("-itsscale", args);
+        Assert.DoesNotContain("-async", args);
+
+        // A future "let's also normalize the frame rate" edit would not add a new FLAG above -- it
+        // would express itself INSIDE the -vf value (e.g. appending ",fps=24" or a setpts= term to
+        // the filtergraph string). No DoesNotContain on list ELEMENTS can see inside a value, so the
+        // filter string itself has to be checked directly.
+        var vf = args[args.ToList().IndexOf("-vf") + 1];
+        Assert.DoesNotContain("fps=", vf, StringComparison.Ordinal);
+        Assert.DoesNotContain("setpts", vf, StringComparison.Ordinal);
+        Assert.DoesNotContain("framerate", vf, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -226,5 +243,54 @@ public class PreviewProxyTests : IDisposable
             () => service.GetOrCreateAsync(source, Info(), progress: null, cts.Token));
 
         Assert.Empty(Directory.GetFiles(_dir, "*.mp4"));
+    }
+
+    [Fact]
+    public async Task GetOrCreateAsync_WhenTheProxyDirectoryIsUnusable_ReportsFailure_RatherThanThrowing()
+    {
+        // Directory.CreateDirectory and the cache-check are real I/O. A locked-down or unavailable
+        // directory must not THROW out of GetOrCreateAsync -- the preview is an aid, never a gate.
+        // Simulated here by putting a FILE where the proxy directory needs to be: CreateDirectory
+        // throws IOException when a file already occupies that path.
+        var blocked = Path.Combine(_dir, "blocked-proxy-dir");
+        File.WriteAllBytes(blocked, new byte[10]);
+
+        var ffmpeg = new FakeFfmpeg();
+        var source = Path.Combine(_dir, "unusable-src.webm");
+        File.WriteAllBytes(source, new byte[64]);
+        var service = new PreviewProxyService(ffmpeg, blocked);
+
+        var result = await service.GetOrCreateAsync(source, Info());
+
+        Assert.False(result.IsSuccess);
+        Assert.NotNull(result.Error);
+    }
+
+    // ---------- SweepStale ----------
+
+    [Fact]
+    public void SweepStale_DeletesOnlyProxiesPastTheCutoff_AndLeavesUnrelatedFilesAlone()
+    {
+        // The 7-day cutoff, the glob, and the delete-on-match were all UNVERIFIED before this test. A
+        // reversed comparison would silently delete every fresh proxy on the first sweep -- or delete
+        // nothing, ever -- and nothing else in the suite would notice either way.
+        var (service, _, _) = Build();
+
+        var stale = Path.Combine(_dir, "preview-stale0000000000000000.mp4");
+        var fresh = Path.Combine(_dir, "preview-fresh0000000000000000.mp4");
+        var unrelated = Path.Combine(_dir, "not-a-proxy.txt");   // shared temp space: not ours to touch
+        File.WriteAllBytes(stale, new byte[10]);
+        File.WriteAllBytes(fresh, new byte[10]);
+        File.WriteAllBytes(unrelated, new byte[10]);
+
+        File.SetLastWriteTimeUtc(stale, DateTime.UtcNow.AddDays(-8));
+        File.SetLastWriteTimeUtc(unrelated, DateTime.UtcNow.AddDays(-8));
+        // `fresh` keeps its just-written (now) timestamp.
+
+        service.SweepStale();
+
+        Assert.False(File.Exists(stale));
+        Assert.True(File.Exists(fresh));
+        Assert.True(File.Exists(unrelated));
     }
 }

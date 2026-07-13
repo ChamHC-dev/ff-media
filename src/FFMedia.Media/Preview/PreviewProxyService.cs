@@ -34,13 +34,30 @@ public sealed class PreviewProxyService : IPreviewProxyService
             return Result<string>.Failure("The video could not be found. It may have been moved or renamed.");
         }
 
-        Directory.CreateDirectory(_proxyDirectory);
-        var proxyPath = PreviewProxyPath.For(sourcePath, _proxyDirectory);
-
-        // Cached from a previous open of this exact file. Re-opening must not pay the transcode again.
-        if (File.Exists(proxyPath) && new FileInfo(proxyPath).Length > 0)
+        string proxyPath;
+        try
         {
-            return Result<string>.Success(proxyPath);
+            // Real I/O, both lines: a locked-down or unavailable proxy directory throws here, and the
+            // cache-check can race a concurrent SweepStale() deleting the file between File.Exists and
+            // the length read. Either would throw OUT of GetOrCreateAsync and take the tool down with
+            // it -- the preview must never be a gate, so any environmental failure here becomes a
+            // Result.Failure instead, exactly like the environmental catches in DeleteQuietly/SweepStale.
+            Directory.CreateDirectory(_proxyDirectory);
+            proxyPath = PreviewProxyPath.For(sourcePath, _proxyDirectory);
+
+            // Cached from a previous open of this exact file. Re-opening must not pay the transcode again.
+            if (File.Exists(proxyPath) && new FileInfo(proxyPath).Length > 0)
+            {
+                return Result<string>.Success(proxyPath);
+            }
+        }
+        catch (IOException ex)
+        {
+            return Result<string>.Failure($"The preview could not be prepared: {ex.Message}");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Result<string>.Failure($"The preview could not be prepared: {ex.Message}");
         }
 
         var total = info.Duration.TotalSeconds;
