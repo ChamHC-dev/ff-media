@@ -33,38 +33,41 @@ milestones. Read it before making design decisions.
 
 ## ▶️ RESUME HERE (next session)
 
-**M9 (Video Preview & Frame Capture) is MID-EXECUTION. Tasks 1–5 of 7 are code-complete. Pick up at the
-Task 5 review, then Task 6.**
+**M9 is COMPLETE and delivered by PR. Nothing is mid-flight.** The branch `feat/m9-video-preview` is
+pushed with all 7 tasks done, reviewed, and green; **the user reviews and merges it** (Rule 3).
 
-### Where you are, exactly
+### The one thing waiting on a human
 
-- **Branch:** `feat/m9-video-preview` (off `main` @ `ba5c9eb`). **HEAD = `38f4596`.** Working tree clean.
-- **Green:** Release build **0 warnings / 0 errors**; **795/795** unit tests (`Category!=Integration`);
-  11 integration tests untouched.
-- **Plan:** [`docs/superpowers/plans/2026-07-13-m9-video-preview.md`](docs/superpowers/plans/2026-07-13-m9-video-preview.md) — 7 TDD tasks, each with the actual code.
-- **Spec:** [`docs/superpowers/specs/2026-07-13-m9-video-preview-design.md`](docs/superpowers/specs/2026-07-13-m9-video-preview-design.md).
-- **Ledger — READ IT FIRST:** [`.superpowers/sdd/progress.md`](.superpowers/sdd/progress.md). It is the
-  recovery map: it names the commits, and **the commits exist in git even when nobody remembers making
-  them**. Trust it and `git log` over any recollection. **Do not re-dispatch a task it marks complete.**
-- **How to execute:** `superpowers:subagent-driven-development`, resuming at Task 5's *review*.
+**Nobody has ever clicked through the preview.** This environment is headless, so a real playing
+`MediaElement` cannot be driven at all. Specifically unproven — and each of these is *invisible to the
+entire suite*:
 
-### 🚩 The one thing you must not skip
+- Does the **readout and slider visibly advance** while a real video plays?
+- After navigating away from the GIF Maker and back, does the **restored frame actually come back**?
+  (`MediaElement.Position` does not move without a Media Foundation session.)
+- Does a preview left **playing** actually **stop** when you navigate away? (`MediaElement.Close()` has
+  **no observable public effect** headlessly — it does **not** reset `Source`; I assumed it did, and was
+  wrong. No test was written rather than one that could not fail.)
+- The **GIF Maker page layout / dark mode / tooltips**. Its `DynamicResource` lookups **fail silently**
+  on a typo (unlike `StaticResource`, which throws at load).
 
-**Task 5 is committed and green, but it was NEVER REVIEWED.** Its implementer finished the work but the
-session ended before the reviewer could be dispatched; I verified the code myself (build, full suite,
-`TooltipCoverageTests`, `GifMakerPageLoadTests`) and committed it so it could not be lost. **A controller's
-spot-check is not the review gate.** It is the only task on this branch with no independent scrutiny — and
-on this project, the per-task review is what has caught every serious bug (a UI-thread hang in Task 3, a
-permanently-frozen readout in Task 4, a data-loss bug in M8). **Dispatch the task reviewer on
-`724f679..38f4596` before starting Task 6.**
+### Next milestone: M10
 
-### Then
+Rollout to the **Merger** (per-clip trim) and **Downloader**, plus the **draggable range band**. Before
+adding a second preview, read the M9 minors roll-up in
+[`.superpowers/sdd/progress.md`](.superpowers/sdd/progress.md) — **two of them are M10 blockers**:
 
-- **Task 6:** a **real-ffmpeg** integration test — a real **VP9/WebM** source must yield a playable proxy
-  whose duration equals the source's *within a frame*. This is the test that pins the whole design.
-- **Task 7:** docs — `SDD.md` (§5 gains the new **`FFMedia.Ui`** layer, §17 M9 → complete, Changelog,
-  bump to **v0.27**) + a Progress Log entry here. Then the **final whole-branch review** (dispatch it on
-  the *most capable* model), fix what it finds, and **open a PR — do not merge. The user reviews and merges.**
+1. **The lifetimes do not survive a second preview.** One singleton `MediaElementPlayer` + one singleton
+   `VideoPreviewViewModel` shared by a Merger preview *and* a GIF Maker preview means two `VideoPreview`
+   controls fighting over one `MediaElement` — **last `Attach` wins**. M9 is single-preview, so this is
+   latent. **M10 must fix the lifetimes before it adds the second one.**
+2. **`DownloaderViewModel` still formats trims with `.ToString(@"hh\:mm\:ss")`** — the *identical*
+   24-hours-vanish bug Task 1 exists to retire (`hh` is the hours **component**, not total hours), still
+   live, and it truncates sub-second precision. **Replace it with `TrimParsing.Format`.**
+
+Also note the **draggable range band is a gesture, not a command** — so it **bypasses `CanExecute`
+entirely**. The capture handlers already carry their own `IsRendering` body guards for exactly this.
+That bug shipped **twice** in M8; do not make it three.
 
 ### Facts already settled — do not re-derive them
 
@@ -83,13 +86,6 @@ permanently-frozen readout in Task 4, a data-loss bug in M8). **Dispatch the tas
 5. **A gesture that is not a command bypasses `CanExecute` entirely.** Guard in *both* the `CanExecute`
    and the method body. That bug shipped **twice** in M8.
 
-### Still unverified by a human (needs a headed click-through — this environment is headless)
-
-- **The GIF Maker page**: layout, drag-and-drop, dark-mode rendering, whether the tooltips land. Its
-  `DynamicResource` lookups **fail silently** on a typo (unlike `StaticResource`, which throws at load).
-- **The preview**: whether the readout and slider *visibly advance* while a real video plays. The timer's
-  start/stop/teardown are proven by reflection; a real playing `MediaElement` cannot be driven headlessly.
-
 ### Deferred M8 minors, logged for triage
 
 The progress bar stalls during the palette pass (palettegen emits one `out_time` line); `_profiles.Load()`
@@ -102,6 +98,77 @@ are unverified against real ffmpeg.
 ## 📓 Progress Log
 
 _Newest first. One entry per completed task/session._
+
+### 2026-07-14 — M9 complete: pause the video, click Set Start, and the frame you're looking at lands in the box
+
+- **Done:** M9's last three gates — the **Task 5 review** (the one the previous session could not run), Task 6
+  (a **real-ffmpeg** proof from a real **VP9/WebM** source), and Task 7 (docs). FFMedia's tools no longer ask
+  you to guess a timecode: **play, pause on the frame you want, click Set Start / Set End.** The GIF Maker is
+  the first consumer; M10 rolls it out to the Merger and Downloader, which is why the control lives in a **new
+  shared `FFMedia.Ui` layer** rather than inside the tool (a tool must never reference another tool, and it
+  cannot reference the WinExe either — so a shared *UI* layer was the only correct home).
+- **Why `MediaElement` is not enough, and why the proxy is the whole design.** WPF's `MediaElement` renders
+  through **Windows Media Foundation**, so its codec support is *Windows'*, not ours — it **cannot play
+  VP9/WebM**, and **WebM is a format our own downloader produces**. Pointing it at the source and calling it
+  done would show a **blank preview for videos FFMedia itself made**. So: play the source; if it refuses,
+  transcode a small H.264 **proxy** and play that. The merger's `ConformanceCheck` discipline reused. **The
+  proxy rescales but NEVER re-times** — the captured timestamp is read from the *player's* position, so a
+  proxy whose timeline drifted would make **every captured time a lie**, and the GIF would be cut somewhere
+  other than where the user saw.
+- **The review is the gate. Not the green suite. This session is the proof.** Task 5 was committed, green, and
+  **never independently reviewed** — the previous session verified it itself and said plainly that *a
+  controller's spot-check is not the gate*. It was right. The review found a **Critical that no single task
+  could have seen, because it lives in the composition of their DI lifetimes**: `MediaElementPlayer` is a
+  **singleton**, `VideoPreview` is **transient**. So navigating to Settings and back built a fresh control → a
+  fresh `MediaElement` → `Attach()` on the *same* singleton player, whose remembered source had already been
+  consumed. The new element had **no `Source`**. The preview went **black — while the ViewModel still reported
+  `IsReady`**, leaving the transport and capture buttons **armed over a dead player**. A click then read
+  `Position` from the empty element and wrote **`0:00`** into Start. *A captured timestamp for a frame the user
+  never saw* — the exact failure the entire no-retiming discipline exists to prevent, arrived at from the other
+  side. **795 tests were green.** That is now the third milestone running where every task passed its own
+  review and the *composition* was still broken (M7: the clip list stayed editable during a merge; M8: the GIF
+  Maker deleted the user's finished GIF).
+- **The same review found the sweeper was never wired.** Task 2 *built and tested* `SweepStale()`; Task 5 — the
+  task that wires the service up — did not call it. Every fallback transcode leaked a proxy into `%Temp%`
+  **forever**. *A tested API with no caller is not a feature; it is dead code with a passing test.*
+- **A test that could not fail, one level up: the instrument was wrong, not the fixture.** The plan's keystone
+  integration test — the one pinning *the proxy never re-times*, the rule the milestone hinges on — compared
+  **durations**. The reviewer ran the rule's own forbidden operations against **real ffmpeg** instead of
+  reasoning about them, and found an **`fps=12` filter throws away HALF THE FRAMES while leaving the duration
+  bit-identical** (4.000000 s either way). A duration check is **structurally incapable** of failing on it —
+  and `fps=` inside the `-vf` value is *precisely* how a future *"let's also normalize the preview frame rate"*
+  edit would arrive. `-r 24` and `-itsscale 1.02` also walked straight through the 0.2 s tolerance: **2.4×
+  too loose to catch the flag the rule is named after.** Worse, the tolerance's own demonstration mutant failed
+  by **1.8 × 10⁻¹⁶** of floating-point margin — *a coincidence, not a proof.* The **frame rate must now survive
+  the transcode unchanged**, which kills every `fps=`/`-r` mutant whatever it does to the duration. **The
+  fixture lesson has a sibling: a fixture can vary correctly along the right axis and still prove nothing, if
+  the instrument does not measure that axis.**
+- **And the plan's own fixture could not fail either** — caught before dispatch. It synthesized a **640×360**
+  source and asserted the proxy's `Width <= 640`. But the cap **is** 640, so the assertion passed **even with
+  the scale filter deleted entirely**. The source is now **wider than the cap** (1280×720) and the *exact*
+  output dimensions are asserted. *An inequality a no-op satisfies is not an assertion.*
+- **The zero-warning gate had been passing without ever compiling the project the warnings were in.** A
+  **clean** (`--no-incremental`) build emits **3 `CS0067`s** — in M9's own preview test stubs. Every "0
+  warnings" claim on this branch, mine included, came from an **incremental** build that skipped recompiling
+  `FFMedia.Tests`. **Always build `--no-incremental` when claiming the gate.** *A green check that skipped the
+  thing it was checking is not a green check.*
+- **I was wrong about a library again, and the test told me so.** I "fixed" a discarded `MediaElement` playing
+  on after navigation by calling `Close()`, and wrote a test asserting it clears `Source`. **It does not** —
+  the element still reports its old `Uri`. The fix is still right (it stops the audio, and releases the file
+  handle an abandoned element would otherwise hold **against `SweepStale`**), but it has **no observable public
+  effect headlessly**, so I deleted the test rather than ship one that passes either way. *Do not reason about
+  what a library "surely" does — and when you cannot prove a fix, say so instead of writing a test that cannot
+  fail.*
+- **Verified:** clean Release build **0 warnings / 0 errors**; **803/803** unit tests; **12/12** integration
+  tests against real ffmpeg — a real **VP9/WebM** source yields a playable **h264** proxy at exactly
+  **640×360** whose **duration *and* frame rate both match the source**.
+- **NOT verified — a human has not clicked through the preview.** Headless environment; a real playing
+  `MediaElement` cannot be driven. Unproven: whether the readout/slider **visibly advance**, whether the
+  **restored frame comes back** after a page revisit, and whether a preview left **playing** actually **stops**
+  when you navigate away. See **▶️ RESUME HERE**.
+- **Next:** user reviews and merges the PR, then clicks through. SDD → **v0.27**, M9 ✅. Then **M10** — and
+  read the minors roll-up first: **the singleton lifetimes will not survive a second preview** (last `Attach`
+  wins), and the **Downloader still carries the 24-hour-vanishing `hh` format bug** Task 1 exists to retire.
 
 ### 2026-07-13 — M9 Tasks 1–5: the preview exists, and capture now feeds the GIF Maker
 
