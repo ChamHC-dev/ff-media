@@ -283,6 +283,21 @@ public class GifMakerViewModelTests
         Assert.Contains("past the end", pastEndHint, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task RangeHint_TreatsEndEqualToStart_AsInvalid()
+    {
+        // The boundary the "end <= start" check exists for. A mutant that weakens it to "end < start"
+        // would pass every other range test (none of them probes exactly this point) yet let a
+        // zero-length range through as valid.
+        var h = await BuildLoadedAsync(seconds: 10);
+
+        h.Vm.StartText = "0:05";
+        h.Vm.EndText = "0:05";
+
+        Assert.False(h.Vm.CanCreate);
+        Assert.Contains("after", h.Vm.RangeHint, StringComparison.OrdinalIgnoreCase);
+    }
+
     // ---- CanCreate ----------------------------------------------------------
 
     [Fact]
@@ -362,7 +377,7 @@ public class GifMakerViewModelTests
     [Fact]
     public async Task WhileRendering_TheParametersAreFrozen()
     {
-        var h = await BuildLoadedAsync(seconds: 10);
+        var h = await BuildLoadedAsync(width: 1920, height: 1080, fps: 30, seconds: 10);
         var gate = new TaskCompletionSource();
         h.Service.Behavior = async (request, _, _) =>
         {
@@ -370,11 +385,31 @@ public class GifMakerViewModelTests
             return Result<string>.Success(request.OutputPath);
         };
 
+        // Pick non-default values BEFORE clicking, so the later mutation (to yet other values) is
+        // unambiguously distinguishable from "the defaults happened to survive by coincidence".
+        h.Vm.SelectedSize = h.Vm.Bounds.Sizes[1];
+        h.Vm.SelectedFrameRate = h.Vm.Bounds.FrameRates[1];
+        h.Vm.OutputFileName = "before.gif";
+
+        var clickTimeSize = h.Vm.SelectedSize;
+        var clickTimeRate = h.Vm.SelectedFrameRate;
+        var clickTimeOutputPath = h.Vm.OutputPath;
+
         var rendering = h.Vm.CreateCommand.ExecuteAsync(null);
         Assert.True(h.Vm.IsRendering);
         Assert.False(h.Vm.CanEditParameters);
         Assert.False(h.Vm.CreateCommand.CanExecute(null));
         Assert.True(h.Vm.CanCancel);
+
+        // Mutate every parameter the render is supposed to have already snapshotted. This is the
+        // regression that matters: if CreateAsync ever re-reads SelectedSize/SelectedFrameRate/
+        // OutputFileName from the LIVE properties instead of the captured `request` local -- exactly
+        // the merger's shipped bug, where flipping Container mid-merge rewrote the history row to name
+        // a file the encode was never writing -- this is what catches it. Flipping booleans before and
+        // after a render proves nothing about which values the job actually used.
+        h.Vm.SelectedSize = h.Vm.Bounds.Sizes[^1];
+        h.Vm.SelectedFrameRate = h.Vm.Bounds.FrameRates[^1];
+        h.Vm.OutputFileName = "after.gif";
 
         gate.SetResult();
         await rendering;
@@ -382,6 +417,63 @@ public class GifMakerViewModelTests
         Assert.False(h.Vm.IsRendering);
         Assert.True(h.Vm.CanEditParameters);
         Assert.True(h.Vm.CreateCommand.CanExecute(null));
+
+        // The SERVICE must have received exactly what was live at CLICK time, never the mutated values.
+        var request = h.Service.Request;
+        Assert.NotNull(request);
+        Assert.Equal(clickTimeSize, request!.Size);
+        Assert.Equal(clickTimeRate, request.Fps);
+        Assert.Equal(clickTimeOutputPath, request.OutputPath);
+        Assert.NotEqual(h.Vm.Bounds.Sizes[^1], request.Size);
+        Assert.NotEqual(h.Vm.Bounds.FrameRates[^1], request.Fps);
+
+        // And the HISTORY ROW must name the file that was actually written -- not the mutated name a
+        // live re-read would now describe.
+        var entry = Assert.Single(h.History.Entries);
+        Assert.Equal(clickTimeOutputPath, entry.OutputPath);
+        Assert.DoesNotContain("after.gif", entry.OutputPath, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LoadVideoAsync_WhileRendering_IsRefused_AndDoesNotDisturbTheRunningJob()
+    {
+        // The regression this pins: LoadVideoAsync overwrites SourcePath/Bounds/SelectedSize/
+        // SelectedFrameRate/StartText/EndText/OutputFileName -- every parameter of the job currently
+        // rendering. A file-drop gesture never goes through CreateCommand's CanExecute, so the
+        // in-method guard is load-bearing on its own, not merely a backstop for the command gate.
+        var h = await BuildLoadedAsync(width: 1920, height: 1080, fps: 30, seconds: 10);
+        var gate = new TaskCompletionSource();
+        h.Service.Behavior = async (request, _, _) =>
+        {
+            await gate.Task;
+            return Result<string>.Success(request.OutputPath);
+        };
+
+        var originalSourcePath = h.Vm.SourcePath;
+        var originalSize = h.Vm.SelectedSize;
+        var originalRate = h.Vm.SelectedFrameRate;
+        var originalOutputPath = h.Vm.OutputPath;
+
+        var rendering = h.Vm.CreateCommand.ExecuteAsync(null);
+        Assert.True(h.Vm.IsRendering);
+
+        h.Analyzer.Returns(@"C:\other.mp4", Info(width: 320, height: 180, fps: 10, seconds: 3));
+
+        // Simulate the drop gesture: calls LoadVideoAsync directly, bypassing LoadVideoCommand.
+        await h.Vm.LoadVideoAsync(@"C:\other.mp4");
+
+        // Refused: the source and every parameter of the running job are exactly as they were.
+        Assert.Equal(originalSourcePath, h.Vm.SourcePath);
+        Assert.Equal(originalSize, h.Vm.SelectedSize);
+        Assert.Equal(originalRate, h.Vm.SelectedFrameRate);
+        Assert.Equal(originalOutputPath, h.Vm.OutputPath);
+        Assert.False(h.Vm.LoadVideoCommand.CanExecute(null));
+
+        gate.SetResult();
+        await rendering;
+
+        // And the job that WAS running still received the original source, not the dropped one.
+        Assert.Equal(originalSourcePath, h.Service.Request!.SourcePath);
     }
 
     [Fact]

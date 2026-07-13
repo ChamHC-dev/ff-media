@@ -82,14 +82,24 @@ public partial class GifMakerViewModel : ObservableObject
     /// <summary>Probes <paramref name="path"/> and, on success, loads it as the source: resets
     /// <see cref="Bounds"/> to what that video allows, defaults size/rate to the source's own (the
     /// keystone), and defaults the range to the whole video.</summary>
-    /// <remarks>A failed probe and a probe that succeeds on a file with no video track are two
+    /// <remarks><para>A failed probe and a probe that succeeds on a file with no video track are two
     /// different problems, and lumping them together actively misleads — the exact mistake that once
     /// blamed a user's perfectly good <c>.mp4</c> for a missing ffprobe binary (CLAUDE.md,
-    /// 2026-07-12). The analyzer already says what went wrong; say it.</remarks>
-    [RelayCommand]
+    /// 2026-07-12). The analyzer already says what went wrong; say it.</para>
+    /// <para>Gated on <see cref="CanEditParameters"/> — loading a video overwrites every parameter of
+    /// whatever is currently loaded, so doing it mid-render mutates the job that is running. Same bug
+    /// class as the merger's shipped one, and the same two-layer fix: <c>CanExecute</c> so the button
+    /// greys out, AND an explicit guard here, because the page's file-drop gesture never goes through
+    /// the command at all (see <c>MergerViewModel.CanEditClips</c>).</para></remarks>
+    [RelayCommand(CanExecute = nameof(CanEditParameters))]
     public async Task LoadVideoAsync(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
+        if (IsRendering)
+        {
+            return; // the page's file-drop handler does not go through the command's CanExecute
+        }
 
         var probe = await _analyzer.AnalyzeAsync(path).ConfigureAwait(true);
 
@@ -166,47 +176,48 @@ public partial class GifMakerViewModel : ObservableObject
 
     private TimeSpan? ParsedEnd => TrimParsing.TryParse(EndText);
 
-    /// <summary>True only when the range is something the service could actually render: both ends
-    /// parse, end is after start, and end does not run past the source (spec: the same rule
-    /// <c>GifService.PreflightAsync</c> enforces, checked here too so the button need not be clicked to
-    /// find out).</summary>
-    private bool RangeIsValid =>
-        SourceLoaded
-        && ParsedStart is { } start
-        && ParsedEnd is { } end
-        && end > start
-        && end <= _sourceInfo!.Duration + RangeTolerance;
+    /// <summary>The validity and the hint, from ONE evaluation of the three boundary conditions
+    /// (unparseable / end &lt;= start / end past the source). <see cref="RangeIsValid"/> and
+    /// <see cref="UpdateRangeHint"/> used to be two hand-written implementations of the same three
+    /// checks — they agreed today, but nothing kept them from drifting, which is exactly the class of
+    /// risk <c>GifBounds</c>, <c>TargetBounds</c> and <c>ConformanceCheck</c> each exist to prevent.
+    /// Now there is exactly one place that decides "is this range OK", and it hands back why.</summary>
+    private readonly record struct RangeEvaluation(bool IsValid, string Hint);
 
-    private void UpdateRangeHint()
+    private RangeEvaluation EvaluateRange()
     {
         if (!SourceLoaded)
         {
-            RangeHint = "";
-            return;
+            return new RangeEvaluation(false, "");
         }
 
         if (ParsedStart is not { } start || ParsedEnd is not { } end)
         {
-            RangeHint = "Enter start and end times as HH:MM:SS, MM:SS, or seconds.";
-            return;
+            return new RangeEvaluation(false, "Enter start and end times as HH:MM:SS, MM:SS, or seconds.");
         }
 
         if (end <= start)
         {
-            RangeHint = "The end time must be after the start time.";
-            return;
+            return new RangeEvaluation(false, "The end time must be after the start time.");
         }
 
         if (end > _sourceInfo!.Duration + RangeTolerance)
         {
-            RangeHint = string.Create(
+            return new RangeEvaluation(false, string.Create(
                 CultureInfo.InvariantCulture,
-                $"The end time is past the end of the video (which is {FormatTime(_sourceInfo.Duration)} long).");
-            return;
+                $"The end time is past the end of the video (which is {FormatTime(_sourceInfo.Duration)} long)."));
         }
 
-        RangeHint = "";
+        return new RangeEvaluation(true, "");
     }
+
+    /// <summary>True only when the range is something the service could actually render: both ends
+    /// parse, end is after start, and end does not run past the source (spec: the same rule
+    /// <c>GifService.PreflightAsync</c> enforces, checked here too so the button need not be clicked to
+    /// find out).</summary>
+    private bool RangeIsValid => EvaluateRange().IsValid;
+
+    private void UpdateRangeHint() => RangeHint = EvaluateRange().Hint;
 
     private void UpdateEstimate()
     {
@@ -279,6 +290,7 @@ public partial class GifMakerViewModel : ObservableObject
         OnPropertyChanged(nameof(CanEditParameters));
         CreateCommand.NotifyCanExecuteChanged();
         CancelCommand.NotifyCanExecuteChanged();
+        LoadVideoCommand.NotifyCanExecuteChanged();
     }
 
     [RelayCommand(CanExecute = nameof(CanCreate))]
