@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using FFMedia.App.ViewModels;
 using FFMedia.Core;
+using FFMedia.Tools.GifMaker;
 using FFMedia.Tools.VideoMerger;
 using FFMedia.Tools.YouTubeDownloader;
 using Microsoft.Extensions.DependencyInjection;
@@ -50,6 +51,14 @@ public partial class App : Application
                     maxConcurrency: Math.Max(1, new FFMedia.Core.Settings.SettingsService(
                         appData, NullLogger<FFMedia.Core.Settings.SettingsService>.Instance).Current.MaxConcurrency));
                 services.AddVideoMerger();
+
+                // The GIF Maker is a single-item editor — no bounded concurrency to configure, unlike
+                // the merger's normalize phase.
+                services.AddGifMakerEngine(
+                    dataDirectory: appData,
+                    tempRoot: Path.Combine(Path.GetTempPath(), "FFMedia"));
+                services.AddGifMaker();
+
                 services.AddSingleton<FFMedia.App.Services.ThemeService>();
                 services.AddSingleton<Wpf.Ui.ISnackbarService, Wpf.Ui.SnackbarService>();
                 services.AddSingleton<FFMedia.Core.Notifications.INotificationService,
