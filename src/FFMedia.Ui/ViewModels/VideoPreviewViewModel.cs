@@ -63,7 +63,16 @@ public partial class VideoPreviewViewModel : ObservableObject
     public TimeSpan Position
     {
         get => _player.Position;
-        set => _player.Position = value;
+        set
+        {
+            _player.Position = value;
+
+            // FINDING 1: a slider drag sets this property, but nothing downstream of it was ever told
+            // to refresh -- so the PositionText readout froze even on a manual scrub, exactly like every
+            // other interaction. RefreshPosition covers both notifications from the one call site that
+            // actually goes through this setter.
+            RefreshPosition();
+        }
     }
 
     public TimeSpan Duration => _info?.Duration ?? TimeSpan.Zero;
@@ -242,7 +251,7 @@ public partial class VideoPreviewViewModel : ObservableObject
         Pause();
         var next = _player.Position + FrameStep;
         _player.Position = Duration > TimeSpan.Zero && next > Duration ? Duration : next;
-        OnPropertyChanged(nameof(Position));
+        RefreshPosition();
     }
 
     [RelayCommand]
@@ -251,10 +260,16 @@ public partial class VideoPreviewViewModel : ObservableObject
         Pause();
         var previous = _player.Position - FrameStep;
         _player.Position = previous < TimeSpan.Zero ? TimeSpan.Zero : previous;
-        OnPropertyChanged(nameof(Position));
+        RefreshPosition();
     }
 
-    [RelayCommand(CanExecute = nameof(CanCapture))]
+    /// <summary>Whether the capture buttons should look clickable, not just BE clickable. Gated on
+    /// <see cref="IsReady"/> as well as <see cref="CanCapture"/>: before any video is loaded, <c>Set
+    /// Start</c>/<c>Set End</c> used to be enabled and silently do nothing when clicked -- a control that
+    /// looks live but does nothing is the same class of bug as the merger's checkbox (CLAUDE.md).</summary>
+    private bool CanCaptureNow => CanCapture && IsReady;
+
+    [RelayCommand(CanExecute = nameof(CanCaptureNow))]
     public void CaptureStart()
     {
         // Guarded in the METHOD as well as in CanExecute, because a gesture that is not a command
@@ -267,7 +282,7 @@ public partial class VideoPreviewViewModel : ObservableObject
         StartCaptured?.Invoke(this, _player.Position);
     }
 
-    [RelayCommand(CanExecute = nameof(CanCapture))]
+    [RelayCommand(CanExecute = nameof(CanCaptureNow))]
     public void CaptureEnd()
     {
         if (!CanCapture || !IsReady)
@@ -284,7 +299,32 @@ public partial class VideoPreviewViewModel : ObservableObject
         CaptureEndCommand.NotifyCanExecuteChanged();
     }
 
+    partial void OnIsReadyChanged(bool value)
+    {
+        CaptureStartCommand.NotifyCanExecuteChanged();
+        CaptureEndCommand.NotifyCanExecuteChanged();
+    }
+
     /// <summary>The current position, formatted the same way the range boxes are — so what the user reads
     /// under the player is exactly what a capture will write into the box.</summary>
     public string PositionText => TrimParsing.Format(Position);
+
+    /// <summary>Refreshes the bindings that read the player's position (the seek slider and
+    /// <see cref="PositionText"/>) WITHOUT writing back to the player.
+    ///
+    /// <para><b>FINDING 1:</b> the VM raised <c>nameof(Position)</c> from <see cref="StepForward"/>/
+    /// <see cref="StepBack"/> (which move the player directly, bypassing this class's own
+    /// <see cref="Position"/> setter), but WPF only refreshes a binding whose EXACT path was notified --
+    /// a "Position" notification never refreshed a "PositionText" binding. So the on-screen readout froze
+    /// at whatever it computed at bind time, through every interaction. This is the one place both
+    /// notifications are raised together, so the two can no longer drift apart.</para>
+    ///
+    /// <para>Also called by the control's own polling timer while the video is <i>playing</i> (Finding
+    /// 2): nothing else moves the readout while playback is running, since neither Play() nor the
+    /// player itself pushes position changes back into this VM.</para></summary>
+    public void RefreshPosition()
+    {
+        OnPropertyChanged(nameof(Position));
+        OnPropertyChanged(nameof(PositionText));
+    }
 }

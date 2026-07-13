@@ -1,3 +1,4 @@
+using FFMedia.Core.Media;
 using FFMedia.Core.Results;
 using FFMedia.Media;
 using FFMedia.Media.Preview;
@@ -327,6 +328,69 @@ public class VideoPreviewViewModelTests
         vm.StepForward();
 
         Assert.Equal(2 + stepMs / 1000.0, player.Position.TotalSeconds, 3);
+    }
+
+    [Fact]
+    public async Task StepForward_UpdatesThePositionReadout_NotJustPosition()
+    {
+        // FINDING 1 (Important). PositionText was never the subject of ANY OnPropertyChanged call --
+        // StepForward only ever raised nameof(Position), and WPF refreshes a binding only when the
+        // EXACT path it is bound to was notified: a "Position" notification never refreshes a
+        // "PositionText" binding. PositionText is a COMPUTED property, so merely reading
+        // `vm.PositionText` after the fact always returns the fresh value regardless of whether any
+        // notification fired -- that alone cannot catch the bug (it would pass even against the
+        // unfixed code). So this asserts BOTH: the value actually changed (the functional behaviour),
+        // AND that "PositionText" is among the property names actually raised (the real defect --
+        // without it, WPF's TextBlock binding never learns to re-pull the value, however correct that
+        // value already is).
+        var (vm, player, _, _) = Build();
+        await vm.LoadAsync(@"C:\clip.mp4"); // 25 fps
+        player.Position = TimeSpan.Zero;
+        var before = vm.PositionText;
+
+        var raised = new List<string?>();
+        vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        vm.StepForward();
+
+        Assert.Contains(nameof(VideoPreviewViewModel.PositionText), raised);
+        Assert.NotEqual(before, vm.PositionText);
+        Assert.Equal(TrimParsing.Format(player.Position), vm.PositionText);
+    }
+
+    [Fact]
+    public async Task SettingPositionDirectly_UpdatesThePositionReadout()
+    {
+        // FINDING 1 explicitly calls out slider-drag as one of the interactions the frozen readout
+        // survived. A dragged Slider's Value is bound TwoWay through THIS property's setter (via a
+        // TimeSpan<->seconds converter) -- the one call site that writes to the player without going
+        // through StepForward/StepBack, so it needed its own fix, not just theirs. Same reasoning as
+        // above: assert the raised property name, not just the (always-fresh) computed value.
+        var (vm, _, _, _) = Build();
+        await vm.LoadAsync(@"C:\clip.mp4");
+        var before = vm.PositionText;
+
+        var raised = new List<string?>();
+        vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        vm.Position = TimeSpan.FromSeconds(7);
+
+        Assert.Contains(nameof(VideoPreviewViewModel.PositionText), raised);
+        Assert.NotEqual(before, vm.PositionText);
+        Assert.Equal(TrimParsing.Format(TimeSpan.FromSeconds(7)), vm.PositionText);
+    }
+
+    [Fact]
+    public void CaptureCommands_AreDisabled_BeforeAnyVideoIsLoaded()
+    {
+        // FINDING 4 (Minor). Before this fix, CanExecute checked ONLY CanCapture (defaults true), so
+        // "Set Start"/"Set End" looked clickable before any video was even open, and clicking was a
+        // silent no-op caught only by the method-body guard. A control that looks live but does nothing
+        // is a dead end -- the same rule that made the merger's checkbox a bug.
+        var (vm, _, _, _) = Build();
+
+        Assert.False(vm.CaptureStartCommand.CanExecute(null));
+        Assert.False(vm.CaptureEndCommand.CanExecute(null));
     }
 
     [Fact]

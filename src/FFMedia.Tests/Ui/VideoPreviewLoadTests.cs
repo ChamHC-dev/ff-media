@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -102,6 +103,53 @@ public class VideoPreviewLoadTests
             shellScrollable > 0,
             $"The shell's ScrollViewer reports ScrollableHeight={shellScrollable}, so a control taller " +
             "than the window cannot be scrolled at all.");
+    }
+
+    /// <summary>FINDING 2. Proves the control's <c>DispatcherTimer</c> starts/stops with playback and,
+    /// critically, is torn down on <c>Unloaded</c> -- a timer that keeps ticking after the user
+    /// navigates away is a leak, and it would go on touching the VM (a DI singleton that can outlive
+    /// this control instance) after the control that created it is gone.
+    ///
+    /// <para><b>How far this actually verifies Finding 2:</b> it proves the timer is started by
+    /// <c>Play()</c>, stopped by <c>Pause()</c>, and stopped again by <c>Unloaded</c> even while still
+    /// running. It does <b>not</b>, and headlessly <b>cannot</b>, prove the timer's tick handler makes a
+    /// REAL playing <c>MediaElement</c>'s position visibly advance on screen in real time -- there is no
+    /// real video file playing here, so <c>MediaElement.Position</c> never actually moves regardless of
+    /// how many times the timer ticks. That end-to-end behaviour needs a human watching the app.</para>
+    /// </summary>
+    [Fact]
+    public void PlayAndPause_StartAndStopThePositionTimer_AndUnloadedTearsItDownRegardless()
+    {
+        var player = new MediaElementPlayer();
+        var vm = new VideoPreviewViewModel(new StubAnalyzer(), new StubProxies(), player);
+
+        var error = RunOnStaThread(() =>
+        {
+            // SAME player instance passed to both -- exactly how DI will wire it (see MediaElementPlayer's
+            // own doc comment): VideoPreview.Attach gives the VM's own IMediaPlayer a real MediaElement.
+            var control = new VideoPreview(vm, player);
+
+            var timerField = typeof(VideoPreview).GetField("_positionTimer", BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(timerField);
+            var timer = (DispatcherTimer)timerField!.GetValue(control)!;
+
+            Assert.False(timer.IsEnabled, "The timer must not run before playback starts.");
+
+            vm.Play();
+            Assert.True(vm.IsPlaying); // sanity: the real (attached) player actually answered
+            Assert.True(timer.IsEnabled, "Play() must start the position timer.");
+
+            vm.Pause();
+            Assert.False(timer.IsEnabled, "Pause() must stop the position timer.");
+
+            vm.Play();
+            Assert.True(timer.IsEnabled, "Sanity: the timer restarts on a second Play().");
+
+            control.RaiseEvent(new RoutedEventArgs(FrameworkElement.UnloadedEvent, control));
+            Assert.False(timer.IsEnabled, "Unloaded must tear the timer down even while it was still running.");
+        });
+
+        Assert.True(error is null, $"Timer teardown test threw:\n{error}");
     }
 
     private static VideoPreviewViewModel BuildViewModel()
