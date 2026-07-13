@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using FFMedia.Tools.YouTubeDownloader.Models;
 using FFMedia.Tools.YouTubeDownloader.Services;
 using Xunit;
@@ -99,6 +100,9 @@ public class TrimParsingTests
     [InlineData(83.45)]
     [InlineData(3723.25)]
     [InlineData(5999.999)]
+    [InlineData(90000)]        // 25h exactly -- TimeSpan's "h" specifier is hours-OF-DAY (0-23), not
+                                // total hours, so a naive Format(25h) emits "1:00:00" and loses a day.
+    [InlineData(91845.5)]      // 25:30:45.5 -- a 24h+ VOD trimmed at a fractional second.
     public void Format_RoundTripsThroughTryParse_ToTheSameInstant(double seconds)
     {
         // THE INVARIANT. Capture formats a position into the box; the tool parses it straight back out
@@ -110,5 +114,38 @@ public class TrimParsingTests
 
         Assert.NotNull(round);
         Assert.Equal(original.TotalMilliseconds, round!.Value.TotalMilliseconds, 0);
+    }
+
+    [Fact]
+    public void Format_OnAGermanLocale_StillEmitsAndParsesInvariantly()
+    {
+        // The InvariantCulture arguments throughout Format/TryParse are pinned by nothing unless a test
+        // actually runs under a comma-decimal culture. On en-US CI, dropping one of those arguments
+        // passes every test in this file and only breaks on a real European user's machine, where
+        // Format would emit "1:23,45" and TryParse would reject its own output -- the round-trip
+        // invariant silently broken in production for a subset of users.
+        var original = CultureInfo.CurrentCulture;
+        var originalUi = CultureInfo.CurrentUICulture;
+        var german = new CultureInfo("de-DE");
+        try
+        {
+            CultureInfo.CurrentCulture = german;
+            CultureInfo.CurrentUICulture = german;
+
+            var span = TimeSpan.FromSeconds(3723.25);
+            var formatted = CoreTrimParsing.Format(span);
+
+            Assert.Equal("1:02:03.25", formatted);
+            Assert.DoesNotContain(',', formatted);
+
+            var parsed = CoreTrimParsing.TryParse(formatted);
+            Assert.NotNull(parsed);
+            Assert.Equal(span.TotalMilliseconds, parsed!.Value.TotalMilliseconds, 0);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = original;
+            CultureInfo.CurrentUICulture = originalUi;
+        }
     }
 }

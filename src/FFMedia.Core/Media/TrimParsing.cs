@@ -91,8 +91,16 @@ public static class TrimParsing
             return span.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
         }
 
-        var whole = span.ToString(
-            span.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss", CultureInfo.InvariantCulture);
+        // NOTE: TimeSpan's custom "h" format specifier renders the hours-OF-DAY component (0-23), not
+        // total hours across day boundaries -- so span.ToString(@"h\:mm\:ss") on a 25-hour span emits
+        // "1:00:00", which TryParse reads back as ONE hour. Twenty-four hours vanish silently. Total
+        // hours must be computed ourselves; span.Minutes/span.Seconds are safe as-is (they are already
+        // the minute-of-hour / second-of-minute components regardless of how many days the span spans).
+        var whole = span.TotalHours >= 1
+            ? ((int)span.TotalHours).ToString(CultureInfo.InvariantCulture) + ":" +
+              span.Minutes.ToString("00", CultureInfo.InvariantCulture) + ":" +
+              span.Seconds.ToString("00", CultureInfo.InvariantCulture)
+            : span.ToString(@"m\:ss", CultureInfo.InvariantCulture);
 
         var fraction = span.TotalSeconds - Math.Floor(span.TotalSeconds);
 
