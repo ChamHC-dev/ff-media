@@ -9,6 +9,8 @@ using FFMedia.Tools.GifMaker;
 using FFMedia.Tools.GifMaker.Services;
 using FFMedia.Tools.GifMaker.ViewModels;
 using FFMedia.Tools.GifMaker.Views;
+using FFMedia.Tools.VideoMerger;
+using FFMedia.Tools.VideoMerger.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Wpf.Ui.Controls;
 using Xunit;
@@ -195,5 +197,56 @@ public class GifMakerServiceCollectionTests
     {
         Assert.Throws<ArgumentException>(() =>
             new ServiceCollection().AddGifMakerEngine(dataDirectory, tempRoot));
+    }
+
+    // --- Cross-module composition: what App.xaml.cs actually builds --------------------------------
+    //
+    // IMediaAnalyzer and IFfmpegRunner are cross-cutting FFMedia.Media services, but BOTH
+    // AddVideoMergerEngine and AddGifMakerEngine self-register them. App.xaml.cs calls both engine
+    // registrations in the same container, so without TryAddSingleton each interface would be
+    // registered twice -- harmless only because both factories happen to wrap the same underlying
+    // IProcessRunner/IBinaryProvider singletons, making "last one wins" a coincidence rather than a
+    // guarantee. These tests build the container the real app builds, in BOTH orders, so the outcome
+    // does not depend on which module's Add*Engine call happens to run first.
+
+    [Fact]
+    public void BothEnginesRegistered_MergerThenGifMaker_ShareOneAnalyzerAndOneRunner()
+    {
+        var temp = Path.GetTempPath();
+        using var provider = new ServiceCollection()
+            .AddFFMediaCore(binariesDirectory: temp, dataDirectory: temp)
+            .AddVideoMergerEngine(dataDirectory: temp, tempRoot: temp, maxConcurrency: 2)
+            .AddGifMakerEngine(dataDirectory: temp, tempRoot: temp)
+            .BuildServiceProvider();
+
+        Assert.Single(provider.GetServices<IMediaAnalyzer>());
+        Assert.Single(provider.GetServices<IFfmpegRunner>());
+
+        // Each module's own services must still resolve correctly.
+        Assert.NotNull(provider.GetRequiredService<IMergeService>());
+        Assert.NotNull(provider.GetRequiredService<ISpeedProfileStore>());
+        Assert.NotNull(provider.GetRequiredService<IGifService>());
+        Assert.NotNull(provider.GetRequiredService<IGifSizeProfileStore>());
+    }
+
+    [Fact]
+    public void BothEnginesRegistered_GifMakerThenMerger_ShareOneAnalyzerAndOneRunner()
+    {
+        // Reverse registration order from the sibling test above: the whole point is that the
+        // outcome must NOT depend on which module's Add*Engine call happens first in App.xaml.cs.
+        var temp = Path.GetTempPath();
+        using var provider = new ServiceCollection()
+            .AddFFMediaCore(binariesDirectory: temp, dataDirectory: temp)
+            .AddGifMakerEngine(dataDirectory: temp, tempRoot: temp)
+            .AddVideoMergerEngine(dataDirectory: temp, tempRoot: temp, maxConcurrency: 2)
+            .BuildServiceProvider();
+
+        Assert.Single(provider.GetServices<IMediaAnalyzer>());
+        Assert.Single(provider.GetServices<IFfmpegRunner>());
+
+        Assert.NotNull(provider.GetRequiredService<IGifService>());
+        Assert.NotNull(provider.GetRequiredService<IGifSizeProfileStore>());
+        Assert.NotNull(provider.GetRequiredService<IMergeService>());
+        Assert.NotNull(provider.GetRequiredService<ISpeedProfileStore>());
     }
 }

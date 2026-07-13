@@ -7,6 +7,7 @@ using FFMedia.Tools.GifMaker.Services;
 using FFMedia.Tools.GifMaker.ViewModels;
 using FFMedia.Tools.GifMaker.Views;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -29,9 +30,13 @@ public static class ServiceCollectionExtensions
         ArgumentException.ThrowIfNullOrWhiteSpace(dataDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(tempRoot);
 
-        services.AddSingleton<IMediaAnalyzer>(sp => new FfprobeMediaAnalyzer(
+        // IMediaAnalyzer and IFfmpegRunner are cross-cutting FFMedia.Media services, not owned by this
+        // module -- the Video Merger registers the identical factories. TryAdd keeps registration
+        // idempotent regardless of which module's Add*Engine call runs first in the composition root,
+        // rather than relying on both factories happening to stay interchangeable ("last one wins").
+        services.TryAddSingleton<IMediaAnalyzer>(sp => new FfprobeMediaAnalyzer(
             sp.GetRequiredService<IProcessRunner>(), sp.GetRequiredService<IBinaryProvider>()));
-        services.AddSingleton<IFfmpegRunner>(sp => new FfmpegRunner(
+        services.TryAddSingleton<IFfmpegRunner>(sp => new FfmpegRunner(
             sp.GetRequiredService<IProcessRunner>(), sp.GetRequiredService<IBinaryProvider>()));
         services.AddSingleton<IGifSizeProfileStore>(sp => new GifSizeProfileStore(
             dataDirectory,
