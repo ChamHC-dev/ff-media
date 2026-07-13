@@ -33,14 +33,20 @@ milestones. Read it before making design decisions.
 
 ## ▶️ RESUME HERE (next session)
 
-**M8 (GIF Maker) is MERGED** (PR #27 → `main` @ `6465c61`). **M9 is designed and awaiting spec review.**
+**M8 (GIF Maker) is MERGED.** **M9 (Video Preview & Frame Capture) is designed AND planned — ready to execute.**
 
-- **Spec:** [`docs/superpowers/specs/2026-07-13-m9-video-preview-design.md`](docs/superpowers/specs/2026-07-13-m9-video-preview-design.md)
-  — **Video Preview & Frame Capture.** Play/pause/seek/frame-step a video, then **‹ Set Start / Set End ›**
-  captures the paused frame's timestamp into the tool's range. Ends **blind timecode entry**. Shared, in a
-  new **`FFMedia.Ui`** layer; **first consumer is the GIF Maker**.
-- **Next step:** user reviews the spec → then `superpowers:writing-plans` for the implementation plan.
-  **No code has been written for M9.** Delivered via branch `docs/m9-video-preview` → PR.
+- **Plan:** [`docs/superpowers/plans/2026-07-13-m9-video-preview.md`](docs/superpowers/plans/2026-07-13-m9-video-preview.md)
+  — **7 TDD tasks, complete with code.** It opens with a **🚦 START HERE** section written for an agent with
+  **zero context**. Read that first.
+- **Spec (the *what*):** [`docs/superpowers/specs/2026-07-13-m9-video-preview-design.md`](docs/superpowers/specs/2026-07-13-m9-video-preview-design.md)
+  — Play/pause/seek/frame-step a video, then **‹ Set Start / Set End ›** captures the paused frame's
+  timestamp into the tool's range. Ends **blind timecode entry**. Shared, in a new **`FFMedia.Ui`** layer;
+  **first consumer is the GIF Maker**.
+- **How to execute:** invoke `superpowers:subagent-driven-development` with the plan. (That skill keeps a
+  ledger at `.superpowers/sdd/progress.md` — **check it before dispatching anything**; if it lists tasks as
+  complete, they are done, and you resume at the first that is not. **It currently holds M8's ledger — reset
+  it.**)
+- **Branch:** `feat/m9-video-preview`, off `main`. **No code has been written for M9.**
 - **Two things the spec settled that you must not re-derive:** (1) WPF's `MediaElement` **cannot play
   VP9/WebM** (verified against real files; MP4/MKV H.264 both open) — and **WebM is a format our own
   downloader produces**, so the design is *fast path + ffmpeg proxy fallback*, and the proxy **rescales
@@ -62,6 +68,38 @@ milestones. Read it before making design decisions.
 ## 📓 Progress Log
 
 _Newest first. One entry per completed task/session._
+
+### 2026-07-13 — M9: implementation plan (no code)
+
+- **Done:** wrote [`docs/superpowers/plans/2026-07-13-m9-video-preview.md`](docs/superpowers/plans/2026-07-13-m9-video-preview.md)
+  — **7 TDD tasks**, each with the actual code and the actual test bodies: (1) `TrimParsing` gains a
+  fractional colon form + a round-trippable `Format`; (2) the **preview proxy** in `FFMedia.Media`
+  (pure args + cache key + service + sweeper); (3) the new **`FFMedia.Ui`** project, the `IMediaPlayer`
+  seam, and the **headless** `VideoPreviewViewModel` (including the fallback, which is the whole design);
+  (4) the `VideoPreview` control + `MediaElementPlayer`; (5) wiring it into the GIF Maker; (6) a
+  **real-ffmpeg** integration test from a **real VP9 source**; (7) docs + PR.
+- **Written to be picked up cold.** Opens with a **🚦 START HERE** section — repo state, the standing
+  rules, the verification gate, and every exact signature it builds against.
+- **The seam that makes it testable:** `MediaElement` cannot be driven headlessly, and the behaviour that
+  most needs a test — *the source fails, so fall back to a proxy* — cannot be triggered on demand with a
+  real one. So the VM talks to **`IMediaPlayer`**, and the tests supply a fake that **refuses a nominated
+  path** on cue. The real `MediaElement` lives behind exactly one adapter.
+- **Facts pre-verified so the next agent inherits no guesses:** `FFMedia.Media` targets **plain `net9.0`**
+  (no WPF, and `TreatWarningsAsErrors`), which is *why* the control needs its own layer; the
+  `SymbolRegular` names `Play24`/`Pause24`/`ChevronLeft24`/`ChevronRight24` all **exist**; and
+  `MediaElement.ScrubbingEnabled` is **load-bearing** — without it, seeking while paused does not render
+  the new frame, so the user would capture a timestamp for **a frame they never saw**.
+- **A trap the plan pins with its own test:** the proxy's scale filter contains `min(640,iw)`, and a
+  **bare comma inside it would SPLIT THE FILTERGRAPH** (ffmpeg separates filters with commas), turning the
+  whole `-vf` argument into garbage. It must be escaped (`\,`).
+- **Two of my own tools nearly handed me false facts, and both were caught by distrusting them.** A
+  `MediaElement` codec probe first reported the *opposite* result (MKV opening, MP4 failing) because a
+  busy-wait loop starved the dispatcher; and an icon check reported every name **MISSING** because
+  `strings` was not installed. **A tool that is broken does not report that it is broken — it reports a
+  wrong answer.** Both were re-run against the authoritative source (a real message loop; `Enum.TryParse`).
+- **Verified:** nothing to build — **documentation only, no code touched**.
+- **Next:** execute the plan (`superpowers:subagent-driven-development`). Delivered via branch
+  `docs/m9-plan` → PR.
 
 ### 2026-07-13 — M9 designed: Video Preview & Frame Capture (spec only, no code)
 
