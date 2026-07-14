@@ -36,15 +36,36 @@ milestones. Read it before making design decisions.
 **M9 is COMPLETE and delivered by PR. Nothing is mid-flight.** The branch `feat/m9-video-preview` is
 pushed with all 7 tasks done, reviewed, and green; **the user reviews and merges it** (Rule 3).
 
-### The one thing waiting on a human
+### 🚩 The click-through found the preview NEVER WORKED — and why that was inevitable
 
-**Nobody has ever clicked through the preview.** This environment is headless, so a real playing
-`MediaElement` cannot be driven at all. Specifically unproven — and each of these is *invisible to the
-entire suite*:
+**The first human to open a video got a black rectangle with every control dead.** `Attach` sets
+`LoadedBehavior = Manual` (load-bearing: without it the element autoplays and ignores the transport) — but
+**a `MediaElement` in Manual mode does not begin loading its media when you merely assign `Source`.** It
+waits to be told to do something. `Open()` assigned `Source` and returned, so **`MediaOpened` never
+fired**, `LoadAsync` awaited it forever, and `IsReady` stayed false. Fixed: `Open()` now calls `Pause()`,
+which opens the file and parks it on the first frame. Measured on a real message loop: *Source alone →
+**never opens***; *Source + `Pause()` → opens in ~440 ms*.
 
-- Does the **readout and slider visibly advance** while a real video plays?
+**And `MediaFailed` could not arrive either — so the VP9/WebM proxy fallback, the entire reason this
+milestone exists, was unreachable in production.** A WebM hung exactly like an MP4. **Every proxy test was
+green**, because they all drive a *fake* player that refuses on cue.
+
+**The lesson, and it is the important one: "it cannot be tested headlessly" was FALSE, and nobody checked.**
+`WpfHost` already runs a real `Dispatcher.Run()` loop — which is all Media Foundation needs. That
+assumption was inherited across sessions, repeated in the spec, the plan, the ledger and three handoffs,
+and **it cost the entire feature**. Two integration tests now drive a **real `MediaElement` against real
+files**: an MP4 must open *and report its duration*, and a **VP9/WebM must be REFUSED** — pinning, against
+a real file for the first time, the premise the whole fallback rests on.
+
+> **Before writing "cannot be verified headlessly" again: TRY IT.** A belief about what a library does is
+> not evidence. This project has now been bitten by exactly that with `MediaElement.Close()`, `TimeSpan`'s
+> `h` specifier, `fps=` vs duration, and `StaticResource` keys. **Run it.**
+
+### Still waiting on a human (genuinely — these are pixels and sound)
+
+- Does the **readout and slider visibly advance** while a video plays, and does the **first frame render**
+  on load (that is `ScrubbingEnabled`'s job)?
 - After navigating away from the GIF Maker and back, does the **restored frame actually come back**?
-  (`MediaElement.Position` does not move without a Media Foundation session.)
 - Does a preview left **playing** actually **stop** when you navigate away? (`MediaElement.Close()` has
   **no observable public effect** headlessly — it does **not** reset `Source`; I assumed it did, and was
   wrong. No test was written rather than one that could not fail.)
@@ -98,6 +119,53 @@ are unverified against real ffmpeg.
 ## 📓 Progress Log
 
 _Newest first. One entry per completed task/session._
+
+### 2026-07-14 — The click-through: the preview never opened a single video, and 822 green tests said it did
+
+- **The user opened a video and got a black rectangle with the slider, play/pause and both capture buttons
+  dead.** Root cause, found by measuring rather than guessing: **a `MediaElement` with
+  `LoadedBehavior = Manual` does not begin loading its media when you merely assign `Source`.** It waits to
+  be told to do something. `Open()` assigned `Source` and returned — so **`MediaOpened` never fired**,
+  `LoadAsync` awaited it forever, and `IsReady` never became true. `Manual` is not the mistake (without it
+  the element autoplays and ignores every `Play`/`Pause`/seek the transport issues); **the mistake was
+  never telling it to load.** `Open()` now calls `Pause()`, which opens the file and parks it on the first
+  frame — the state the preview wants to start in. `Play()` would also open it, but by starting playback
+  nobody asked for.
+- **The measurement that settled it in one shot** (real message loop, real H.264 MP4):
+  `Manual + Source alone → **MediaOpened NEVER fires**` · `Manual + Source + Pause() → opens in ~440 ms` ·
+  `Manual + Source + Play() → ~430 ms` · `default behavior + Source → ~450 ms`.
+- **Worse than the black screen: the whole point of the milestone was dead code.** Because `MediaFailed`
+  could not arrive either, **the VP9/WebM proxy fallback could never trigger** — a WebM hung exactly like
+  an MP4. The proxy, the cache, the sweeper, the no-retiming rule, the real-ffmpeg VP9 test: all correct,
+  all green, and **unreachable from the running app**.
+- **Why every one of 822 tests missed it, which is the lesson.** Every VM test drives a **fake**
+  `IMediaPlayer` that raises `MediaOpened` synchronously; the real-player tests only ever asserted that
+  `Source` had been **assigned**. Nobody asked the one question that mattered — *does a real `MediaElement`,
+  configured the way we configure it, actually **open**?* **A fake that always answers cannot discover that
+  the real thing never answers.**
+- **And the reason nobody asked: "a real `MediaElement` cannot be driven headlessly" — WHICH IS FALSE.**
+  `WpfHost` has been running a real `Dispatcher.Run()` loop this whole time, which is all Media Foundation
+  needs. I proved it in about ten minutes. That assumption was inherited across sessions, written into the
+  spec, the plan, the ledger and three handoffs — each repetition making it more load-bearing and less
+  examined — and **it cost the entire feature.** *An untested assumption about a library is not a
+  constraint; it is a guess wearing a constraint's clothes.* **Before writing "cannot be verified
+  headlessly" again: try it.**
+- **My own harness lied to me first, and I nearly believed it.** The first probe reported that *every*
+  configuration failed to open — including WPF's default, which obviously works. That was a broken harness
+  (`DispatcherFrame`/`PushFrame` never pumped properly), not evidence. **A tool that is broken does not
+  report that it is broken — it reports a wrong answer.** The previous M9 session was caught by this exact
+  trap **twice**; the only defence is a result that is *too strange to be true* being treated as a bug in
+  the instrument.
+- **Now pinned by two integration tests that drive a REAL `MediaElement` against REAL files:** an MP4 must
+  **open and report its duration** (a player that answers but has no duration still leaves the slider with
+  nothing to show), and a **VP9/WebM must be REFUSED** — which pins, against a real file for the first
+  time, the premise the entire fallback design rests on. Both **mutation-proven**: without the `Pause()`
+  they hang and fail.
+- **Verified:** clean Release build **0 warnings / 0 errors**; **822/822** unit; **14/14** integration
+  (was 12).
+- **Still unverified — pixels and sound, which a test genuinely cannot judge:** whether the first frame
+  actually *renders* on load, whether the readout/slider *visibly advance* during playback, and whether a
+  preview left playing *stops* on navigate-away.
 
 ### 2026-07-14 — M9 complete: pause the video, click Set Start, and the frame you're looking at lands in the box
 
