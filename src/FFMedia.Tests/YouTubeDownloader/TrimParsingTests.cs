@@ -94,6 +94,22 @@ public class TrimParsingTests
         => Assert.Equal(expected, CoreTrimParsing.Format(TimeSpan.FromSeconds(seconds)));
 
     [Theory]
+    [InlineData(1.9996, "0:02")]      // was "0:011" -- a two-second capture rendered as ELEVEN
+    [InlineData(30.9996, "0:31")]     // was "0:301" -- unparseable
+    [InlineData(59.9996, "1:00")]     // was "0:591" -- the carry has to reach the MINUTES, not just the seconds
+    [InlineData(119.9997, "2:00")]    // was "1:591"
+    [InlineData(3599.9999, "1:00:00")] // was "59:591" -- the carry has to reach the HOURS
+    [InlineData(0.9996, "0:01")]      // was "1" -- the sub-second branch has to give way to the m\:ss one
+    public void Format_RoundsAtTheCarryBoundary_RatherThanGluingTheCarryOntoTheSeconds(double seconds, string expected)
+    {
+        // The round-trip theory below cannot catch all of these on its own: 0.9996 formatted as the bare
+        // "1", which TryParse happens to read back as one second, so the round trip was ACCIDENTALLY
+        // intact while the string on screen was wrong. The rendered TEXT is what the user reads and what
+        // lands in the Start/End box, so the text itself has to be pinned.
+        Assert.Equal(expected, CoreTrimParsing.Format(TimeSpan.FromSeconds(seconds)));
+    }
+
+    [Theory]
     [InlineData(0)]
     [InlineData(0.25)]
     [InlineData(7.125)]
@@ -103,6 +119,24 @@ public class TrimParsingTests
     [InlineData(90000)]        // 25h exactly -- TimeSpan's "h" specifier is hours-OF-DAY (0-23), not
                                 // total hours, so a naive Format(25h) emits "1:00:00" and loses a day.
     [InlineData(91845.5)]      // 25:30:45.5 -- a 24h+ VOD trimmed at a fractional second.
+    // ---- the CARRY BOUNDARY. Every case above stops SHORT of it, which is exactly why the bug below
+    // survived a green suite. The whole part was built by TRUNCATION (span.Seconds / the m\:ss
+    // specifier) while the fraction was rendered with ".###", which ROUNDS -- so any fraction >= 0.9995
+    // rounded up to a bare "1" that was then GLUED ONTO the seconds digits, and the carry never reached
+    // them: 1.9996s formatted as "0:011", which TryParse reads back as ELEVEN SECONDS. A user pausing at
+    // 1.9996s and clicking Set Start got a GIF cut from 11s, silently, with CanCreate still true. The
+    // other cases below format as "0:301"/"0:591"/"1:591"/"59:591" -- unparseable, so a probed source
+    // duration landing in that band writes garbage into EndText on LOAD and greys Create out on a
+    // perfectly good video. Both values M9 newly feeds through Format -- the player's live position and
+    // ffprobe's probed duration -- are ARBITRARY machine-produced sub-second numbers, so this band is not
+    // an edge case: it is 1-in-2500 of every capture.
+    [InlineData(1.9996)]
+    [InlineData(30.9996)]
+    [InlineData(59.9996)]
+    [InlineData(119.9997)]
+    [InlineData(3599.9999)]
+    [InlineData(0.9996)]       // the SUB-SECOND branch's own carry: "0.###" emits "1", which parses as
+                                // one second by luck rather than by design. It must round to "0:01".
     public void Format_RoundTripsThroughTryParse_ToTheSameInstant(double seconds)
     {
         // THE INVARIANT. Capture formats a position into the box; the tool parses it straight back out

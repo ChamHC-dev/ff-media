@@ -85,7 +85,24 @@ public static class TrimParsing
             span = TimeSpan.Zero;
         }
 
-        // Under a second there is no minute worth showing; "0.5" is what a human means.
+        // Rounded to the DISPLAYED precision (a millisecond -- the ".###" below) BEFORE anything is
+        // decomposed out of it, so a carry propagates into the seconds, the minutes and the hours the way
+        // arithmetic requires.
+        //
+        // The bug this prevents: the whole part used to be built by TRUNCATION (span.Seconds, and the
+        // m\:ss specifier) while the fraction was rendered with ".###", which ROUNDS. Any fraction >=
+        // 0.9995 therefore rounded up to a bare "1" that was GLUED ONTO the truncated seconds -- the
+        // carry never reached them. Format(1.9996s) emitted "0:011", which TryParse reads back as ELEVEN
+        // SECONDS: a user who paused at 1.9996s and clicked Set Start got a GIF cut from 11s, silently,
+        // with the range still valid and Create still enabled. Others in that band ("0:301", "0:591")
+        // are unparseable outright, so a probed source duration landing there greys Create out on a
+        // perfectly good freshly-loaded video. BOTH values M9 feeds through here -- the player's live
+        // position and ffprobe's probed duration -- are arbitrary machine-produced sub-second numbers, so
+        // the band is hit roughly one capture in 2500, not never.
+        span = TimeSpan.FromMilliseconds(Math.Round(span.TotalMilliseconds));
+
+        // Under a second there is no minute worth showing; "0.5" is what a human means. (Checked AFTER
+        // the rounding: 0.9996s is one second, and belongs in the m\:ss branch below.)
         if (span > TimeSpan.Zero && span.TotalSeconds < 1)
         {
             return span.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
