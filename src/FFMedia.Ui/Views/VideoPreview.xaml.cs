@@ -80,6 +80,14 @@ public partial class VideoPreview : UserControl
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
+        // FIRST, and before anything is torn down: STOP THE VIDEO. The XAML sets
+        // UnloadedBehavior="Manual", which is exactly the flag that says "a MediaElement pulled out of the
+        // visual tree does not stop" -- so navigating away from a playing preview left the audio playing,
+        // indefinitely, from a page that is no longer on screen. The player's only Close() lives in
+        // Attach(), which runs when the user comes BACK: the wrong end of the journey. (Attach() reads the
+        // element's position to restore it, and Pause does not move it, so the resume is unaffected.)
+        _viewModel.Pause();
+
         _positionTimer.Stop();
         _positionTimer.Tick -= OnPositionTimerTick;
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;

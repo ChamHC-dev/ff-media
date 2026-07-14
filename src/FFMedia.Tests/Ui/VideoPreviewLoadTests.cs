@@ -152,6 +152,41 @@ public class VideoPreviewLoadTests
         Assert.True(error is null, $"Timer teardown test threw:\n{error}");
     }
 
+    /// <summary>FINDING 3 (final review). <c>VideoPreview.xaml</c> sets
+    /// <c>UnloadedBehavior="Manual"</c> — which is precisely the flag that says "a MediaElement removed
+    /// from the visual tree does NOT stop". <c>OnUnloaded</c> stopped the timer and unsubscribed from the
+    /// VM, but never told the PLAYER anything: so playing a video and navigating to Settings left the
+    /// audio running, indefinitely, from a page that is no longer on screen. The only <c>Close()</c> lives
+    /// in <c>Attach</c>, which runs when the user comes BACK — the wrong end of the journey entirely.
+    ///
+    /// <para><b>What this does and does not prove.</b> It proves <c>Unloaded</c> routes a real
+    /// <c>Pause()</c> into the real (attached) <see cref="MediaElementPlayer"/>, which is the fix.
+    /// It cannot prove the SOUND actually stops: there is no Media Foundation session behind a headless
+    /// MediaElement with no file, so <c>MediaElement.Pause()</c> has no observable effect of its own. That
+    /// last step needs a human: play a video, navigate away, listen.</para></summary>
+    [Fact]
+    public void Unloaded_PausesThePlayer_SoAPreviewLeftPlayingDoesNotKeepPlayingOffScreen()
+    {
+        var player = new MediaElementPlayer();
+        var vm = new VideoPreviewViewModel(new StubAnalyzer(), new StubProxies(), player);
+
+        var error = RunOnStaThread(() =>
+        {
+            var control = new VideoPreview(vm, player);   // Attach() gives the player the real element
+            vm.Play();
+            Assert.True(player.IsPlaying, "Sanity: the attached player really did start.");
+
+            control.RaiseEvent(new RoutedEventArgs(FrameworkElement.UnloadedEvent, control));
+
+            Assert.False(
+                player.IsPlaying,
+                "Navigating away left the player playing. UnloadedBehavior=Manual means WPF will not stop " +
+                "it for us -- the audio goes on playing from a page that is not on screen.");
+        });
+
+        Assert.True(error is null, $"Unloaded teardown test threw:\n{error}");
+    }
+
     private static VideoPreviewViewModel BuildViewModel()
         => new(new StubAnalyzer(), new StubProxies(), new MediaElementPlayer());
 
